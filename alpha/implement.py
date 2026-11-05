@@ -1,0 +1,409 @@
+"""Implement a suggestion: a headless Claude Code agent carries out its how in the project's own repository, on a
+new branch in a separate worktree, and reports; Alpha then commits the change on that branch itself.
+
+The user's working folder is never touched: the branch alpha/<slug> starts from the repository's current HEAD
+(uncommitted changes there are not included) in var/worktrees/<project>-<slug>. The agent runs like the skill
+test agent (skill_test.environment: the same Claude account, no MCP servers, don't-ask mode) with `claude_model`,
+and without the user's own Claude Code settings (their hooks would keep a finished agent going); it may only read,
+edit files in the worktree, fetch pages, and run the project's tests, checks, and dependency installs: no commit,
+no push, no deploy. Alpha commits as the user (their git identity and hooks, no trailers) with "Alpha: <headline>";
+nothing is pushed, deployed, published, sent, or bought.
+
+The agent is given the suggestion, the source item, the project's spec and focus brief, and the user's Ask about
+this conversation (suggestion_chat.py), whose decisions and constraints take precedence over the suggestion.
+
+A project with no local repository (only a GitHub repository or a vault note) gets a ready-to-run task file
+instead, var/handoffs/<project>/<slug>.md; nothing runs.
+
+One implementation at a time: each waits for var/implement.lock (the Mac is short on memory).
+"""
+
+import fcntl
+import json
+import os
+import re
+import shutil
+import signal
+import sqlite3
+import subprocess
+import traceback
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+
+from . import focus, suggestion_chat, writer
+from .config import TOOL_ROOT, Settings
+from .projects import _local_file, _repository_spec
+from .skill_test import OUTPUT_TAIL_CHARACTERS, environment
+from .skills import slug
+from .storage import content_of, now
+
+WORKTREES = TOOL_ROOT / "var" / "worktrees"
+HANDOFFS = TOOL_ROOT / "var" / "handoffs"
+LOCK = TOOL_ROOT / "var" / "implement.lock"
+TIME_LIMIT_SECONDS = 30 * 60
+# A run still marked implementing (or queued) after this long stopped without saying so; it may start again.
+STALE = {"implementing": timedelta(seconds=TIME_LIMIT_SECONDS) + timedelta(minutes=15), "queued": timedelta(hours=3)}
+BRANCH_WORDS = 6
+BRANCH_CHARACTERS = 40
+ITEM_CHARACTERS = 20_000
+SPEC_CHARACTERS = 6000
+# Reading and editing in the worktree, reading the web, and the commands a project's tests, checks, and dependency
+# installs need. Anything else (git commit or push, gh, deploy tools, other scripts) is refused in don't-ask mode.
+CHECK_COMMANDS = (
+    "cd", "git status", "git diff", "git log", "git show", "ls",
+    "uv run pytest", "uv run python -m pytest", "uv run -m pytest", "uv run python -m unittest", "uv run test.py",
+    "uv run ruff", "uv run mypy", "uv run pyright", "uv sync", "uvx ruff",
+    "pytest", "python -m pytest", "python3 -m pytest", "python -m unittest", "python3 -m unittest",
+    "npm test", "npm run test", "npm run lint", "npm run typecheck", "npm run check", "npm install", "npm ci",
+    "npx tsc", "npx vitest", "npx eslint", "npx jest",
+    "bun test", "bun run test", "bun run lint", "bun run typecheck", "bun run check", "bun install",
+    "bunx tsc", "bunx vitest", "bunx eslint",
+    "cargo test", "cargo check", "go test", "go vet", "make test", "make check",
+)
+AGENT_TOOLS = " ".join(["Read", "Glob", "Grep", "Edit", "Write", "WebFetch", "WebSearch",
+                        *(f"Bash({command}:*)" for command in CHECK_COMMANDS)])
+REFUSED_TOOLS = ("Bash(git commit:*) Bash(git push:*) Bash(git reset:*) Bash(git checkout:*) Bash(gh:*) "
+                 "Bash(vercel:*) Bash(npm publish:*)")
+AGENT_PROMPT = """You are carrying out one suggestion in the user's project {project}. You are in a git worktree of \
+its repository, on the new branch {branch}; the user's own working folder is elsewhere and stays untouched.
+
+# The suggestion
+{headline}
+Outcome the user expects: {outcome}
+
+How (start here): {action}
+{questions}
+# Rules
+- Start with the first step. Keep the change small and reviewable: the smallest change that carries out the first \
+step well, in the project's own style and structure, in as few files as you can. Read only what you need (search, \
+then read the parts that matter): your context is limited.
+- Work only in this folder: read, edit, and create files here.
+- Run the project's existing tests or checks, if any (see package.json, pyproject.toml, Makefile, the README). You \
+may install its dependencies in this folder. Only these commands are allowed (each with its own arguments): \
+{commands}. If the project's check needs another command, do not try it; give it in your report.
+- Do not commit, push, deploy, publish, send, sign up, or buy anything, and change nothing outside this folder. \
+Alpha commits your changes on this branch after you finish, and the user reviews them.
+- Do not ask questions: make sensible choices and say what you assumed.
+- If the suggestion does not fit this repository, or needs something you do not have (an account, a paid tool, \
+data), change only what helps, or nothing, and say so.
+
+Finish with your report as your final message, in Markdown, with exactly these sections:
+## What I changed
+## Why
+## How I checked it
+## What's left
+
+# The project
+{spec}
+
+# What the user is working on now (focus brief)
+{brief}
+
+# The source item: {title}
+{url}
+
+{summary}
+
+{text}
+"""
+HANDOFF = """# {headline}
+
+Project: {project} (no local repository Alpha could find, so nothing ran; run this task where the code lives)
+Outcome: {outcome}
+Source: {title}, {url}
+
+## Task
+{action}
+{questions}
+## First step
+{first_step}
+
+## Acceptance
+- The first step above is done, as a small, reviewable change in the project's own style.
+- The project's existing tests or checks pass (or the report says why one could not run).
+- Nothing is pushed, deployed, published, sent, or bought; the change waits on its own branch for review.
+- The work ends with a report: what changed, why, how it was checked, what's left.
+
+## The project
+{spec}
+
+## What the user is working on now (focus brief)
+{brief}
+
+## The source item: {title}
+{url}
+
+{summary}
+
+{text}
+"""
+
+
+class Failure(Exception):
+    """A run that cannot go on; its message is the reason shown on the suggestion."""
+
+
+@dataclass(frozen=True)
+class Plan:
+    """What Implement will do for one suggestion, read back before it starts."""
+    item: sqlite3.Row
+    suggestion: sqlite3.Row
+    headline: str
+    repository: Path | None   # None: no local repository, a handoff file instead
+    head: str                 # the repository's current branch (or commit) the new branch starts from
+    branch: str
+    worktree: Path
+    handoff: Path
+
+
+def _git(folder: Path, *arguments: str, check: bool = True) -> subprocess.CompletedProcess:
+    """git in `folder` with the user's own environment: their identity, config, and hooks."""
+    completed = subprocess.run(["git", "-C", str(folder), *arguments], capture_output=True, text=True,
+                               stdin=subprocess.DEVNULL)
+    if check and completed.returncode != 0:
+        raise Failure(f"git {' '.join(arguments[:2])} failed: {(completed.stderr or completed.stdout).strip()[-600:]}")
+    return completed
+
+
+def repository(settings: Settings, project: str) -> Path | None:
+    """The project's local git repository: its config.toml folder, else a repository under `[context]
+    projects_directory` with its name (or its GitHub repository's name)."""
+    folders = [settings.project_repositories[project]] if project in settings.project_repositories else []
+    names = {focus._normal(project)}
+    if project in settings.project_github:
+        names.add(focus._normal(settings.project_github[project].rsplit("/", 1)[-1]))
+    if settings.context.projects_directory:
+        folders += [repo for repo in focus.repositories(settings.context.projects_directory)
+                    if focus._normal(repo.name) in names and not repo.is_relative_to(WORKTREES)]
+    for folder in folders:
+        if folder.is_dir() and (top := _git(folder, "rev-parse", "--show-toplevel", check=False)).returncode == 0:
+            return Path(top.stdout.strip())
+    return None
+
+
+def headline_of(suggestion: sqlite3.Row) -> str:
+    """The headline, or (before it was written) the how's first clause."""
+    return suggestion["headline"] or re.split(r"[;:.]", suggestion["action"].split(":", 1)[-1])[0].strip()
+
+
+def first_step(action: str) -> str:
+    match = re.search(r"first step:?\s*(.+)$", action, re.IGNORECASE | re.DOTALL)
+    return match.group(1).strip() if match else action
+
+
+def state(suggestion: sqlite3.Row) -> str | None:
+    """The implementation's state; a queued or implementing run past its STALE limit shows as stale."""
+    status = suggestion["implement_status"]
+    if status in STALE and suggestion["implement_started_at"]:
+        if datetime.now(UTC) - datetime.fromisoformat(suggestion["implement_started_at"]) > STALE[status]:
+            return "stale"
+    return status
+
+
+def can_start(suggestion: sqlite3.Row) -> bool:
+    return state(suggestion) in (None, "failed", "handoff", "stale")
+
+
+def _row(connection: sqlite3.Connection, item_id: str, project: str) -> sqlite3.Row | None:
+    return connection.execute("SELECT * FROM suggestions WHERE item_id = ? AND project = ?",
+                              (item_id, project)).fetchone()
+
+
+def plan(connection: sqlite3.Connection, settings: Settings, item_id: str, project: str) -> Plan | None:
+    suggestion = _row(connection, item_id, project)
+    item = connection.execute("SELECT * FROM items WHERE id = ?", (item_id,)).fetchone()
+    if suggestion is None or item is None:
+        return None
+    headline = headline_of(suggestion)
+    name = slug(" ".join(headline.split()[:BRANCH_WORDS]))
+    if len(name) > BRANCH_CHARACTERS:  # cut at a word, not inside one
+        name = name[:BRANCH_CHARACTERS + 1].rsplit("-", 1)[0]
+    name = name.strip("-") or "suggestion"
+    repo = repository(settings, project)
+    head = ""
+    branch, worktree = f"alpha/{name}", WORKTREES / f"{slug(project)}-{name}"
+    if repo:
+        current = _git(repo, "symbolic-ref", "--short", "-q", "HEAD", check=False).stdout.strip()
+        commit = _git(repo, "rev-parse", "--short", "HEAD", check=False).stdout.strip()
+        head = f"{current} ({commit})" if current else commit
+        # An earlier run of this suggestion is replaced; another suggestion's branch or folder is left alone.
+        own = {suggestion["implement_branch"], suggestion["implement_path"]}
+        number = 1
+        while ((branch not in own and _git(repo, "rev-parse", "--verify", "-q", f"refs/heads/{branch}",
+                                           check=False).returncode == 0)
+               or (str(worktree) not in own and worktree.exists())):
+            number += 1
+            branch, worktree = f"alpha/{name}-{number}", WORKTREES / f"{slug(project)}-{name}-{number}"
+    return Plan(item, suggestion, headline, repo, head, branch, worktree, HANDOFFS / slug(project) / f"{name}.md")
+
+
+def _context(connection: sqlite3.Connection, plan: Plan) -> dict[str, str]:
+    """What the agent (or the handoff file) is given: the suggestion, the project's spec and brief, the item."""
+    project = plan.suggestion["project"]
+    spec = connection.execute("SELECT spec FROM projects WHERE name = ?", (project,)).fetchone()
+    spec = spec["spec"] if spec else (_repository_spec(_local_file(plan.repository)) if plan.repository else "")
+    brief = focus.latest_briefs(connection).get(project)
+    item = plan.item
+    return {
+        "project": project, "branch": plan.branch, "headline": plan.headline, "commands": ", ".join(CHECK_COMMANDS),
+        "questions": questions(connection, plan.item["id"], project),
+        "outcome": plan.suggestion["outcome"] or "(not written)", "action": plan.suggestion["action"],
+        "first_step": first_step(plan.suggestion["action"]),
+        "spec": (spec or "(no description)")[:SPEC_CHARACTERS], "brief": brief["brief"] if brief else "(none yet)",
+        "title": item["title"] or item["title_source"] or item["url"], "url": item["url"],
+        "summary": item["summary"] or "",
+        "text": writer.item_text(item, content_of(connection, item["id"]))[:ITEM_CHARACTERS],
+    }
+
+
+def questions(connection: sqlite3.Connection, item_id: str, project: str) -> str:
+    """The user's Ask about this conversation, as a section of the agent's prompt ('' when there is none)."""
+    messages = suggestion_chat.get(connection, item_id, project)
+    if not messages:
+        return ""
+    return ("\n# The user's questions and answers about it\nThe user asked about this suggestion before implementing. "
+            "Their decisions and constraints here take precedence over the suggestion.\n\n"
+            f"{suggestion_chat.transcript(messages)}\n")
+
+
+def _set(connection: sqlite3.Connection, item_id: str, project: str, **values) -> None:
+    columns = ", ".join(f"implement_{name} = ?" for name in values)
+    connection.execute(f"UPDATE suggestions SET {columns} WHERE item_id = ? AND project = ?",
+                       (*values.values(), item_id, project))
+    connection.commit()
+
+
+def _clear(connection: sqlite3.Connection, item_id: str, project: str, status: str | None) -> None:
+    _set(connection, item_id, project, status=status, branch=None, base=None, path=None, report=None, error=None,
+         files=None, started_at=now() if status else None, finished_at=None)
+
+
+def handoff(connection: sqlite3.Connection, plan: Plan) -> Path:
+    """The task file for a project with no local repository; nothing runs."""
+    plan.handoff.parent.mkdir(parents=True, exist_ok=True)
+    plan.handoff.write_text(HANDOFF.format(**_context(connection, plan)))
+    item_id, project = plan.item["id"], plan.suggestion["project"]
+    _clear(connection, item_id, project, "handoff")
+    _set(connection, item_id, project, path=str(plan.handoff), finished_at=now())
+    return plan.handoff
+
+
+def queue(connection: sqlite3.Connection, item_id: str, project: str) -> None:
+    """Marked before the background run starts, so the dashboard shows it at once. An earlier run's branch and
+    worktree stay recorded, so the run can delete them before it starts again."""
+    _set(connection, item_id, project, status="queued", error=None, started_at=now(), finished_at=None)
+
+
+def repository_of(worktree: Path) -> Path | None:
+    """The repository a worktree belongs to."""
+    if not worktree.is_dir():
+        return None
+    common = _git(worktree, "rev-parse", "--path-format=absolute", "--git-common-dir", check=False)
+    return Path(common.stdout.strip()).parent if common.returncode == 0 else None
+
+
+def _remove_worktree(settings: Settings, suggestion: sqlite3.Row) -> None:
+    """Delete a run's worktree and branch (Alpha's own: under var/worktrees, named alpha/...), from the repository
+    they belong to."""
+    folder = Path(suggestion["implement_path"]) if suggestion["implement_path"] else None
+    if folder is None or not folder.is_relative_to(WORKTREES):
+        return
+    repo = repository_of(folder) or repository(settings, suggestion["project"])
+    if repo:
+        _git(repo, "worktree", "remove", "--force", str(folder), check=False)
+        if (suggestion["implement_branch"] or "").startswith("alpha/"):
+            _git(repo, "branch", "-D", suggestion["implement_branch"], check=False)
+        _git(repo, "worktree", "prune", check=False)
+    shutil.rmtree(folder, ignore_errors=True)
+
+
+def remove(connection: sqlite3.Connection, settings: Settings, item_id: str, project: str) -> None:
+    """Remove: the worktree and its branch are deleted, and the suggestion can be implemented again."""
+    suggestion = _row(connection, item_id, project)
+    if suggestion is None:
+        return
+    _remove_worktree(settings, suggestion)
+    _clear(connection, item_id, project, None)
+
+
+def diff(suggestion: sqlite3.Row) -> tuple[str, str]:
+    """The branch against its base: (stat, patch)."""
+    folder = Path(suggestion["implement_path"] or "")
+    if not suggestion["implement_base"] or not folder.is_dir():
+        return "", ""
+    span = f"{suggestion['implement_base']}..{suggestion['implement_branch']}"
+    return (_git(folder, "diff", "--stat", span, check=False).stdout,
+            _git(folder, "diff", "--find-renames", span, check=False).stdout)
+
+
+def _agent(folder: Path, prompt: str, model: str) -> str:
+    """The agent's report (its final message). Stopped at TIME_LIMIT_SECONDS with its whole process group."""
+    command = [
+        shutil.which("claude", path=environment()["PATH"]) or "claude", "-p", prompt,
+        "--model", model, "--strict-mcp-config", "--setting-sources", "project,local", "--permission-mode", "dontAsk",
+        "--allowedTools", AGENT_TOOLS, "--disallowedTools", REFUSED_TOOLS, "--output-format", "json",
+    ]
+    process = subprocess.Popen(command, cwd=folder, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                               env=environment(), stdin=subprocess.DEVNULL, start_new_session=True)
+    try:
+        printed, errors = process.communicate(timeout=TIME_LIMIT_SECONDS)
+    except subprocess.TimeoutExpired:
+        os.killpg(process.pid, signal.SIGTERM)
+        process.communicate()
+        raise Failure(f"The agent did not finish within {TIME_LIMIT_SECONDS // 60} minutes; its unfinished changes "
+                      f"are left uncommitted in {folder}.") from None
+    try:
+        answer = json.loads(printed)
+    except json.JSONDecodeError:
+        raise Failure(f"The agent stopped (exit {process.returncode}): "
+                      f"{(errors or printed).strip()[-OUTPUT_TAIL_CHARACTERS:]}") from None
+    report = (answer.get("result") or "").strip()
+    if process.returncode != 0 or answer.get("is_error") or not report:
+        raise Failure(f"The agent stopped ({answer.get('subtype') or f'exit {process.returncode}'}): "
+                      f"{(report or errors).strip()[-OUTPUT_TAIL_CHARACTERS:]}")
+    return report
+
+
+def _commit(folder: Path, base: str, headline: str, item: sqlite3.Row) -> int:
+    """Commit everything the agent changed, as the user (their identity and hooks; never --no-verify), with a plain
+    message and no trailers. Returns how many files the branch changes (0: nothing changed, no commit)."""
+    _git(folder, "add", "-A")
+    if _git(folder, "diff", "--cached", "--quiet", check=False).returncode != 0:
+        title = item["title"] or item["title_source"] or "an item"
+        _git(folder, "commit", "-q", "-m", f"Alpha: {headline}",
+             "-m", f"Suggested by Alpha from {title}\n{item['url']}")
+    return len(_git(folder, "diff", "--name-only", f"{base}..HEAD").stdout.splitlines())
+
+
+def run(connection: sqlite3.Connection, settings: Settings, item_id: str, project: str) -> None:
+    """Carry out the suggestion (the `implement` command, started by the dashboard's Confirm)."""
+    LOCK.parent.mkdir(parents=True, exist_ok=True)
+    with LOCK.open("w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)  # one at a time: a second run waits here, shown as queued
+        suggestion = _row(connection, item_id, project)
+        if suggestion is None:
+            raise SystemExit(f"Implement: no suggestion for {item_id} in {project}")
+        _remove_worktree(settings, suggestion)  # an earlier failed run's worktree and branch
+        _clear(connection, item_id, project, "implementing")
+        try:
+            chosen = plan(connection, settings, item_id, project)
+            if chosen.repository is None:
+                raise Failure(f"{project} has no local repository; use Implement again to write a task file instead.")
+            base = _git(chosen.repository, "rev-parse", "HEAD").stdout.strip()
+            WORKTREES.mkdir(parents=True, exist_ok=True)
+            _git(chosen.repository, "worktree", "add", "-q", "-b", chosen.branch, str(chosen.worktree), base)
+            _set(connection, item_id, project, branch=chosen.branch, base=base, path=str(chosen.worktree))
+            print(f"Implement: {project}: {chosen.headline} on {chosen.branch} in {chosen.worktree}", flush=True)
+            prompt = AGENT_PROMPT.format(**_context(connection, chosen))
+            report = _agent(chosen.worktree, prompt, writer.resolve_model(settings.claude_model))
+            _set(connection, item_id, project, report=report)
+            files = _commit(chosen.worktree, base, chosen.headline, chosen.item)
+            _set(connection, item_id, project, status="implemented", files=files, finished_at=now())
+            print(f"Implement: done, {files} file{'' if files == 1 else 's'} changed on {chosen.branch}", flush=True)
+        except Exception as error:  # a crashed run must not stay "implementing"
+            reason = str(error) if isinstance(error, Failure) else f"{type(error).__name__}: {error}"
+            if not isinstance(error, Failure):
+                print(traceback.format_exc(), flush=True)
+            _set(connection, item_id, project, status="failed", error=reason[:4000], finished_at=now())
+            print(f"Implement: failed: {reason}", flush=True)

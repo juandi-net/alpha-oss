@@ -1,0 +1,6 @@
+.env
+config.toml
+.venv/
+var/
+__pycache__/
+.oss-deny

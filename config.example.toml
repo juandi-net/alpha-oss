@@ -1,0 +1,177 @@
+# Alpha configuration. `alpha setup` copies this to config.toml (personal, git-ignored); edit that copy.
+# Secrets belong in .env, not here. Relative paths are resolved from this folder; ~ is your home folder.
+
+database_path = "var/alpha.db"
+
+# Project specs: what every item is scored against. A vault note (one Markdown file per project, named
+# <project>.md) takes precedence over a repository with the same name. Optional.
+# project_notes_directory = "~/notes/projects"
+
+# Vault pages (Markdown, one per project plus an index). Optional: unset turns them off.
+# output_directory = "~/notes/alpha"
+
+# Skills built from item topics are published here (Claude Code reads ~/.claude/skills). If you keep a library
+# elsewhere, set skills_directory to it and active_skills_directory to the folder agents read; each published
+# skill is then linked there.
+skills_directory = "~/.claude/skills"
+# active_skills_directory = "~/.claude/skills"
+# Jev probability (0 to 1) that a new item belongs to an active skill topic.
+topic_threshold = 0.7
+
+# Daily copy of the database and saved images (14 days kept). Optional.
+# backup_directory = "~/Backups/alpha"
+
+# A family name (sonnet, opus, haiku) uses the newest model of that family; a full id pins one.
+# claude_model: image text, reasons, focus briefs, and the agent in each skill's test run.
+claude_model = "sonnet"
+# summary_model: each item's title and summary. Opus keeps more of the specifics (names, numbers, steps)
+# that search, matching, and skills rely on.
+summary_model = "opus"
+# skill_model: proposing topics, writing skill specs, and grading test runs.
+skill_model = "opus"
+# jev-latest follows TypeSafe's releases. When the version behind it changes, the next run scores
+# every item again (projects and skill topics) so old and new scores are never mixed.
+jev_model = "jev-latest"
+
+# Relevance is a Jev Score from 0 to 3 (levels are defined in alpha/jev.py).
+# 1.5 sits between "same field, nothing usable" (1) and "an idea the project could adopt" (2).
+relevance_threshold = 1.5
+# Added to every relevance question. Changing it scores every item again on the next run.
+relevance_guidance = """Every project needs people to find it, trust it, and pay for it or use it. \
+Ideas about marketing, SEO, sales, distribution, and audience growth are ideas any project could adopt."""
+# Jev probability (0 to 1) that an item repeats an earlier idea.
+duplicate_threshold = 0.85
+
+# Used only for the cost estimate printed after each run.
+jev_price_per_million_input_tokens = 0.042
+
+# Repository fallback for project specs: README.md, AGENTS.md, and CLAUDE.md, whichever exist.
+[project_repositories]
+# my-app = "~/projects/my-app"
+
+# Same spec files, read from GitHub through the `gh` CLI, for projects without a local clone.
+[project_github]
+# my-library = "owner/my-library"
+
+# Jev picks exactly one category per item. Order here is the order on each page.
+[categories]
+ai = "Artificial intelligence: models, agents, prompting, and LLM tooling"
+seo = "Search engine optimization: search ranking, indexing, and organic traffic"
+workflow = "Personal productivity, automation, and working methods"
+development = "Software engineering: languages, frameworks, infrastructure, and developer tools"
+design = "Visual, product, and user-experience design"
+marketing = "Marketing, sales, audience growth, and content distribution"
+business = "Business strategy, operations, finance, and entrepreneurship"
+other = "Anything that fits none of the other categories"
+
+# The shared judge: every candidate a discovered source finds goes through it before it becomes an item.
+[judge]
+fit_threshold = 0.4   # stage 1: candidates whose title and preview fit no focus brief this well are dropped
+model = "haiku"       # stage 2: this Claude model and Jev must both call it sauce
+novelty = 0.6         # and it must be at least this likely not to repeat an item or skill you have
+
+# Context: what you are working on, written into one focus brief per active project. Briefs drive the
+# discovery queries and the judge. Activity is read locally and only Claude sees it. Every feed is off
+# until you enable it.
+[context]
+# projects_directory = "~/projects"  # git repositories here with recent commits or agent prompts are active projects
+days = 14             # activity window
+refresh_days = 3      # briefs are rewritten this often, or sooner when activity changes
+
+[context.agents]      # prompts you typed to omp (~/.omp/agent/history.db) and Claude Code (~/.claude/projects)
+enabled = false
+
+[context.git]         # commit subjects and changed paths of each project repository
+enabled = false
+
+[context.superwhisper]  # superwhisper dictations
+enabled = false
+excluded_apps = ["Messages"]  # dictations into these apps are never read
+
+[context.anarlog]     # Anarlog meeting summaries and notes (or transcripts)
+enabled = false
+days = 30             # meetings look further back
+
+# Sources. Curated: items you picked (trusted). Discovered: items Alpha finds (judged first).
+# Each runs at most once per every_hours; `alpha run` checks the cadence, `alpha collect`/`alpha discover` ignore it.
+[sources.x]           # curated: your X bookmarks, read through x.com in Lightpanda (needs X_AUTH_TOKEN, X_CT0)
+enabled = false
+every_hours = 20
+post_pages = 40       # bookmark pages opened per run for threads and replies
+
+[sources.x_timeline]  # discovered: your Following and For You timelines, judged against your taste (same X session as x)
+enabled = false
+every_hours = 20
+following_scrolls = 60   # safety cap; Following stops at posts seen in an earlier run
+for_you_scrolls = 30
+
+[sources.github_stars]  # curated: repos you star on GitHub. Sign in with `gh auth login`, or set GITHUB_TOKEN in .env
+enabled = false
+every_hours = 6
+readmes = 300               # READMEs fetched per run
+readme_characters = 12000   # README text kept per repo
+
+[sources.hf_likes]  # curated: models, datasets, and Spaces you like on Hugging Face (HF_TOKEN in .env, or `hf auth login`)
+enabled = false
+every_hours = 6
+request_delay_seconds = 1.0
+max_requests = 100          # per run: the likes list, then two per like (metadata and card)
+cards = 40                  # likes whose metadata and card are read per run
+card_characters = 12000     # card text kept per repo
+
+[sources.substack]    # discovered: Substack posts for your focus briefs and open requests
+enabled = false
+every_hours = 20
+request_delay_seconds = 3.0  # at least this long (plus up to half again) between requests
+max_requests = 120    # requests per run (half for searching)
+search_pages = 2      # result pages per query
+requery_days = 14     # a query is searched again after this many days
+archive_publications = 3  # publications with finds whose archive gets one more page read per run
+
+[sources.papers]                 # discovered: papers that ship code, models or datasets (Hugging Face Daily Papers + paper search; free, no key)
+enabled = false
+every_hours = 20                 # one pass a day; each pass reads the Daily Papers list
+request_delay_seconds = 1.0
+max_requests = 150               # Hugging Face + GitHub requests per run (half discovery, half reading survivors)
+daily_papers = 50                # papers read from the Daily Papers list per pass
+results_per_query = 8            # search results per need
+requery_days = 7                 # brief queries searched again weekly
+
+[sources.huggingface]  # discovered: Hugging Face datasets for concrete data needs Claude reads from each focus brief
+# Free public API, no key. Datasets never feed skills; they show as project resources.
+enabled = false
+every_hours = 168             # weekly
+request_delay_seconds = 2.0
+max_requests = 40             # per run: half searching, half reading dataset cards
+results_per_search = 20
+requery_days = 30
+min_downloads = 20            # hard filter: downloads last month at least this ...
+min_likes = 2                 # ... or likes at least this
+
+[sources.hf_following]  # discovered: what the organizations and people you follow on Hugging Face release, judged against your taste
+# Same token as hf_likes. Variants of one release (quantizations, GGUF copies, checkpoints) are judged once.
+enabled = false
+every_hours = 20
+request_delay_seconds = 1.0
+max_requests = 150          # per run: about 3 listings per followed account, then one card per release judged
+first_days = 14             # the first run looks back this far; later runs list what changed since the last
+per_listing = 100           # repos listed per account and type, most recently changed first
+card_characters = 12000
+
+[sources.github_trending]  # discovered: repos trending on GitHub (today, this week, your languages), judged against your taste
+# Pages read like a browser; READMEs through the GitHub API (same sign-in as github_stars). Repos can feed skills.
+enabled = false
+every_hours = 20
+request_delay_seconds = 3.0
+max_requests = 60           # per run: the trending pages, then two API calls per repo judged
+languages = ["python", "typescript", "swift"]  # daily trending pages read besides the overall ones
+readme_characters = 12000
+
+[sources.hf_trending]  # discovered: models, datasets, and Spaces trending on Hugging Face, judged against your taste
+# Same token as hf_likes. Obvious junk Spaces (adult, face swap, test) are dropped before the judge.
+enabled = false
+every_hours = 20
+request_delay_seconds = 1.0
+max_requests = 60           # per run: three listings, then one card per release judged
+per_listing = 50            # repos read from each trending list
+card_characters = 12000
