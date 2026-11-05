@@ -190,7 +190,7 @@ is checked by the registry; `alpha setup` and `alpha status` report it.
 ## Dashboard
 
 `alpha serve` (or the launchd job from `alpha install`) serves http://localhost:3460: the Feed, each item's page and
-skill chat, Projects, Skills, and Requests. The Feed is the stream and little else: each item's title, one line (the
+skill chat, Projects, Ideas, Skills, and Requests. The Feed is the stream and little else: each item's title, one line (the
 judge's why for a find, with a "how?" that opens where it came from, both judges' calls, and the bookmarks the judge
 was shown; a find or an idea with a suggestion leads with its headline instead, see Suggestions below), its source,
 and α / β; search and filters wait behind one control, and one quiet line above the list
@@ -200,7 +200,7 @@ says you are caught up and when the next run is, then Older follows, with a divi
 older day (the list is in rank order, so a day's label never repeats further down). The status dot in
 the header pulses while a run is going and opens the run ledger, where a failed source shows red with its error.
 Press `?` for the keyboard shortcuts (`j`/`k` through a list, `o` to open, `a`/`b` to rate, `g` then
-`f`/`p`/`s`/`r` for the tabs, `/` to search, Esc to leave a comparison or a readback).
+`f`/`p`/`i`/`s`/`r` for the tabs, `/` to search, Esc to leave a comparison or a readback).
 
 **Filters.** Every filter option shows how many items it would leave; one that would leave none stays, grayed, with
 its 0. Typing a search also lists the categories, projects, sources, and authors whose names match, above the
@@ -251,6 +251,11 @@ MCP. It is the strongest signal Alpha has of what you want items for: the next t
 under their own heading. A project with a live suggestion for the item is not offered (rate or ask about that one);
 one Alpha skipped is replaced. Start over clears the chat; the suggestion it made stays.
 
+**Ideas tab.** The loop from idea to branch on one page, in stage order: Being shaped (Have an idea chats not yet
+kept), Implementing (running, or waiting its turn), To review (implemented on a branch), Kept, not started (your
+ideas and the suggestions you rated α), Stopped (failed or stalled; Try again), and Done. Each entry is the
+suggestion itself, with α / β, Implement, Review changes, and Ask about this in place; `g` then `i` opens it.
+
 **Ask about this.** Under each suggestion on an item's page (and in a project's list, once opened), ask questions
 before you implement it, for example "how would this affect X, and how much work is it?". Claude (`claude_model`)
 answers in a few plain sentences (impact, cost, risk, effort) from the suggestion, the item's full text, and the
@@ -277,6 +282,17 @@ the diff against the commit it started from, the commands to merge or delete the
 or Failed with the reason and Try again. Marking it done stays yours. A project with no local repository (a GitHub
 repository or a vault note only) gets a ready-to-run task file instead, `var/handoffs/<project>/<slug>.md` (the
 suggestion, the item's text, the first step, and acceptance checks); nothing runs.
+
+**Let There.** A layer over the apps you build (`letthere/`, its own tool; Alpha's Feed is its first app): rest the
+pointer on anything and a thin frame marks it, press `\` (a normal backslash while you type in a field) to lock the
+frame, and a glass box opens beside it with the cursor inside, so a dictation app such as Superwhisper types
+straight into it. ↑ widens the frame to the surrounding element (↓ narrows it back), Enter saves, Esc closes. The
+note becomes `letthere/var/notes/alpha/<id>.md`: what you said, the element's CSS path and place in the page, its
+text, an HTML excerpt, and a picture of it beside it as `<id>.png`. Start the server with
+`uv run letthere/server.py` (port 3470, standard library only) and set `let_there_url = "http://localhost:3470"`
+in config.toml; any other app on localhost joins with
+`<script src="http://localhost:3470/overlay.js" data-app="NAME" defer></script>`. Notes are saved only for now:
+building each one on a branch comes next.
 
 ## Agents (MCP)
 

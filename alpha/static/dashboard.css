@@ -524,6 +524,10 @@ ul.suggestions .suggestion { margin-top: 0; }
 .chip.yours { color: var(--brass); border-color: var(--brass); background: none; }
 .suggestion .headline .chip { vertical-align: 2px; }
 #own-idea .plan .actions form { display: inline; }
+ul.shaping li { padding: 6px 0; font-size: 15px; }
+ul.shaping a { font-weight: 600; text-decoration: none; }
+ul.shaping a:hover { color: var(--brass); }
+#shaping + section, #running + section, #review + section, #kept + section, #failed + section { margin-top: 28px; }
 
 /* Ask about this: questions about a suggestion, in the skill chat's bubbles. */
 .suggestion details.ask { margin-top: 8px; border-top: 1px solid var(--rule); padding-top: 6px; }

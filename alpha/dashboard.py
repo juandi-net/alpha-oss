@@ -1,7 +1,8 @@
 """Browser dashboard on localhost only. Pages: the Feed (every item but those rated β, filters, full-text search, day
 dividers, and where the new items end), an item's page, Turned down (what the judge left out), Projects (focus
 briefs, matches, resources: datasets, models, Spaces), Skills (with a skill update beside the live version,
-/skills/<name>/compare/<n>), Requests (what agents asked discovery for), and an implemented suggestion's review
+/skills/<name>/compare/<n>), Ideas (the loop from idea to branch: being shaped, implementing, to review, kept, done),
+Requests (what agents asked discovery for), and an implemented suggestion's review
 (/item/<id>/suggestion/<project>/review: the agent's report and the branch's diff). A build, a discovery request, and
 Implement first show a readback of what they will do (/skills/<name>/confirm, /item/<id>/build, /requests/confirm,
 /item/<id>/suggestion/<project>/implement) and start only on its Confirm; an expired X session or an X refusal shows
@@ -95,7 +96,8 @@ VISIT_GAP = timedelta(minutes=30)
 SEEN_COOKIE, ACTIVE_COOKIE = "alpha_seen", "alpha_active"
 COOKIE_AGE = 400 * 24 * 3600
 # Where `g` then a letter goes, and the keyboard sheet `?` opens.
-GO_KEYS = (("f", "/", "Feed"), ("p", "/projects", "Projects"), ("s", "/skills", "Skills"), ("r", "/requests", "Requests"))
+GO_KEYS = (("f", "/", "Feed"), ("p", "/projects", "Projects"), ("i", "/ideas", "Ideas"), ("s", "/skills", "Skills"),
+           ("r", "/requests", "Requests"))
 KEYS = (("j / k", "Next / previous item in a list"), ("o or Enter", "Open the selected item"),
         ("a / b", "Rate the selected item α or β (again to clear)"),
         ("/", "Search the Feed"), ("Esc", "Clear the search, close this sheet, leave a comparison or a readback"),
@@ -325,6 +327,8 @@ def _layout(connection: sqlite3.Connection, settings: Settings, view: str, title
     counts = {
         "feed": f"{count('SELECT COUNT(*) FROM items'):,} items",
         "projects": f"{len(_project_names(connection)):,} projects",
+        "ideas": f"""{count("SELECT COUNT(*) FROM suggestions WHERE implement_status IN ('queued', 'implementing')"):,} """
+                 f"""implementing, {count("SELECT COUNT(*) FROM suggestions WHERE implement_status = 'implemented' AND status = 'open'"):,} to review""",
         "skills": f"{count('SELECT COUNT(*) FROM topics'):,} skills",
         "requests": f"""{count("SELECT COUNT(*) FROM requests WHERE status != 'done'"):,} open requests""",
     }
@@ -338,10 +342,14 @@ def _layout(connection: sqlite3.Connection, settings: Settings, view: str, title
         f'<a href="{href}" class="{"active" if view == name else ""}"{" aria-current=page" if view == name else ""} '
         f'title="{counts[name]}"><span class="glyph" aria-hidden="true">{glyph}</span>{label}{marks.get(name, "")}</a>'
         for name, href, label, glyph in (("feed", "/", "Feed", "≡"), ("projects", "/projects", "Projects", "◇"),
-                                         ("skills", "/skills", "Skills", "✦"), ("requests", "/requests", "Requests", "?"))
+                                         ("ideas", "/ideas", "Ideas", "✎"), ("skills", "/skills", "Skills", "✦"),
+                                         ("requests", "/requests", "Requests", "?"))
     )
     keys = "".join(f"<dt><kbd>{escape(key)}</kbd></dt><dd>{escape(what)}</dd>" for key, what in KEYS)
     go = escape(json.dumps({key: href for key, href, _ in GO_KEYS}))
+    # Let There (letthere/): point at something on the Feed, press \, say what should change.
+    let_there = (f'\n<script src="{escape(settings.let_there_url)}/overlay.js" data-app="alpha" defer></script>'
+                 if settings.let_there_url and view == "feed" else "")
     return f"""<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -357,7 +365,7 @@ def _layout(connection: sqlite3.Connection, settings: Settings, view: str, title
 <main>{main}</main>
 <dialog id="keys" aria-labelledby="keys-title"><h4 id="keys-title">Keyboard</h4><dl>{keys}</dl>
 <form method="dialog"><button class="secondary">Close</button></form></dialog>
-<script src="{_static("dashboard.js")}" defer></script>
+<script src="{_static("dashboard.js")}" defer></script>{let_there}
 </body></html>"""
 
 
@@ -2011,6 +2019,75 @@ def skills_page(settings: Settings, notice: str = "", *, seen: str) -> str:
 # Requests ---------------------------------------------------------------------------------------------
 
 
+def ideas_page(settings: Settings, seen: str) -> str:
+    """The loop from idea to branch, in stage order: ideas being shaped (Have an idea chats not yet kept), what is
+    implementing or waiting its turn, branches to review, the ideas you kept (yours and Alpha's rated α) that are
+    not started, and what is done. Every entry is the suggestion itself, with α / β, Implement, Review, and Ask
+    about this in place. Your own ideas carry the Your idea chip."""
+    connection = _connect(settings)
+    try:
+        shaping = connection.execute(
+            "SELECT c.*, i.title, i.title_source FROM idea_chats c JOIN items i ON i.id = c.item_id "
+            "WHERE c.suggested_at IS NULL ORDER BY c.updated_at DESC").fetchall()
+        listed = connection.execute(
+            "SELECT s.*, i.title, i.title_source, substr(i.text, 1, 400) AS text, i.source, i.tier FROM suggestions s "
+            "JOIN items i ON i.id = s.item_id WHERE s.implement_status IS NOT NULL OR s.basis_kind = 'user' "
+            "OR s.rating = 'alpha' ORDER BY COALESCE(s.implement_started_at, s.rated_at, s.created_at) DESC"
+        ).fetchall()
+        chats = suggestion_chat.all_for(connection, list({s["item_id"] for s in listed}))
+        stages: dict[str, list[sqlite3.Row]] = {"running": [], "review": [], "kept": [], "done": [], "failed": []}
+        for row in listed:
+            state = implement.state(row)
+            if state in ("queued", "implementing"):
+                stages["running"].append(row)
+            elif row["status"] == "done":
+                stages["done"].append(row)
+            elif state == "implemented":
+                stages["review"].append(row)
+            elif state in ("failed", "stale"):
+                stages["failed"].append(row)
+            elif row["status"] == "open":
+                stages["kept"].append(row)
+
+        def entries(rows: list[sqlite3.Row]) -> str:
+            return "".join(_suggestion(s["item_id"], s, item=s, chat=chats.get((s["item_id"], s["project"])))
+                           for s in rows)
+
+        def section(key: str, title: str, lede: str, rows: list[sqlite3.Row], empty: str) -> str:
+            body = (f'<ul class="suggestions">{entries(rows)}</ul>' if rows else f'<p class="empty">{empty}</p>')
+            return (f'<section id="{key}"><h2>{title} <span class="n">{len(rows)}</span></h2>'
+                    f'<p class="note">{lede}</p>{body}</section>')
+
+        shaped = "".join(
+            f'<li><a href="/item/{quote(c["item_id"])}#own-idea">{escape(IdeaPlan.model_validate_json(c["plan"]).headline)}</a>'
+            f'<span class="note"> for {escape(c["project"])} · from {escape(c["title"] or c["title_source"] or "an item")} · '
+            f'{_ago(c["updated_at"])}</span></li>'
+            for c in shaping
+        )
+        main = (
+            '<header class="page-head"><h1>Ideas</h1><p>From an idea to a branch: what you are shaping, what Alpha is '
+            "building, what waits for your review, and what you kept for later. Have an idea on any item’s page "
+            "starts one; α on one of Alpha’s suggestions keeps it here.</p></header>"
+            f'<section id="shaping"><h2>Being shaped <span class="n">{len(shaping)}</span></h2>'
+            '<p class="note">Have an idea chats not yet kept as a suggestion; open one to go on.</p>'
+            + (f'<ul class="plain shaping">{shaped}</ul>' if shaping
+               else '<p class="empty">Nothing being shaped. Open an item and press Have an idea.</p>')
+            + "</section>"
+            + section("running", "Implementing", "Running now, or waiting its turn (one at a time).", stages["running"],
+                      "Nothing running.")
+            + section("review", "To review", "Implemented on a branch; open Review changes, then merge or remove it and "
+                      "mark it done.", stages["review"], "No branch waiting for review.")
+            + section("kept", "Kept, not started", "Your ideas and the suggestions you rated α; Implement starts one.",
+                      stages["kept"], "Nothing kept yet.")
+            + section("failed", "Stopped", "Implementations that failed or stalled; Try again starts them over.",
+                      stages["failed"], "None.")
+            + section("done", "Done", "Marked done by you.", stages["done"], "Nothing marked done yet.")
+        )
+        return _layout(connection, settings, "ideas", "Ideas", main, seen)
+    finally:
+        connection.close()
+
+
 def requests_page(settings: Settings, seen: str, notice: str = "", error: str = "") -> str:
     """What you and your agents asked discovery to look for, open first, with what each request admitted, and the
     form that files a new one."""
@@ -2754,6 +2831,8 @@ class _Handler(BaseHTTPRequestHandler):
         elif path.startswith("/project/"):
             html = project_page(settings, unquote(path.removeprefix("/project/")), "all" in query, seen=seen,
                                 view=field("suggestions"), ask_error=ask_error)
+        elif path == "/ideas":
+            html = ideas_page(settings, seen)
         elif path == "/rejected":
             html = rejected_page(settings, query, seen)
         elif path == "/requests":

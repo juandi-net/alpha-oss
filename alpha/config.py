@@ -68,6 +68,7 @@ class Settings:
     judge: JudgeSettings = field(default_factory=JudgeSettings)
     context: ContextSettings = field(default_factory=ContextSettings)
     sources: dict[str, dict] = field(default_factory=dict)  # [sources.<name>] tables, read by alpha.sources.config
+    let_there_url: str = ""           # Let There's server (letthere/): its overlay loads on the Feed; empty turns it off
 
 
 def resolve(value: str) -> Path:
@@ -112,6 +113,7 @@ def load_settings(config_path: Path = CONFIG_PATH) -> Settings:
         judge=_table(JudgeSettings, "judge", raw.get("judge", {})),
         context=_context(raw.get("context", {})),
         sources={name: dict(table) for name, table in raw.get("sources", {}).items()},
+        let_there_url=str(raw.get("let_there_url", "")).strip().rstrip("/"),
     )
 
 
