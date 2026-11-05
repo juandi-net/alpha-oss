@@ -236,8 +236,10 @@ item's page. Each project's page lists its suggestions under What to do, headlin
 how and the item: the ones you rated α first, then the unrated; β-rated and done ones each have a filter.
 
 **Have an idea.** When you see a use Alpha did not, open the item, and in the Have an idea card (under Make a
-skill) pick the project and say what you would do with it there, as rough as it comes. Claude (`claude_model`)
-shapes it with you in a chat (`own_idea.py`, `writer.plan_idea`): every answer carries the current plan (the idea
+skill) pick the project and say what you would do with it there, as rough as it comes. An omp agent (`claude_model`,
+one omp session per chat with your MCP servers and skills, so it can search Alpha, read the project's repository,
+or ask Interface Lineage mid-conversation; `own_idea.py`, `omp_agent.py`) shapes it with you: every answer carries
+the current plan (the idea
 distilled to its core, headline, outcome, how, effort) and up to three sharpenings to take or leave (a cut, a
 tighter scope, a stronger first step, something in the item you missed), says where it is weak, keeps your intent
 rather than replacing it, and asks only what would change the how. When the plan is what you
@@ -262,9 +264,10 @@ repository folder, the new branch `alpha/<slug>`, the model (`claude_model`), th
 Confirm, `alpha implement` (`implement.py`) makes a git worktree of the project's local repository (its
 `[project_repositories]` folder, or a repository with its name under `[context] projects_directory`) on that branch
 from its current HEAD, in `var/worktrees/<project>-<slug>`, so your own working folder is never touched. A headless
-Claude Code agent (the skill test agent's clean environment: no MCP servers, don't-ask mode) carries out the first
-step there in 30 minutes at most: it may read, edit files in the worktree, fetch pages, and run the project's tests,
-checks, and dependency installs; no commit, push, or deploy. Alpha then commits the change on the branch itself, as
+omp agent (`omp -p`, `omp_agent.py`: your own omp login, every MCP server in `~/.omp/agent/mcp.json`, and your
+skills) carries out the first step there in 30 minutes at most: it is told to read, edit files in the worktree, and
+run the project's tests, checks, and dependency installs, and not to commit, push, deploy, send, or buy; the rules,
+the worktree, and the time limit are the guard (omp has no command deny-list). Alpha then commits the change on the branch itself, as
 you (your git identity and hooks, no trailers), "Alpha: <headline>" with the item's link; nothing is pushed,
 deployed, published, sent, or bought. One implementation runs at a time (`var/implement.lock`). The suggestion
 shows Implementing… with its running time, then Implemented with the branch and Review changes (the agent's report,
@@ -368,9 +371,11 @@ subscriptions). Logs carry counts, never text or secrets. The dashboard listens 
   a daily run with a few new items costs under $0.01; a Substack discovery pass about $0.02 to $0.05.
 - Claude: image transcriptions, match reasons, briefs, queries, the Haiku judge, and suggestion questions are small
   calls; summaries and suggestions use Opus (suggestions at most 30 per run). Skill builds (Opus plus a Claude Code
-  test run of up to 30 minutes) and Implement (a Claude Code run of up to 30 minutes) are the expensive part and run
-  only when you ask or when a live skill's items change. `ALPHA_CLAUDE_BASE_URL` can point at a local proxy (such
-  as CLIProxyAPI) that serves a Claude subscription instead of the pay-per-token API.
+  test run of up to 30 minutes) are the expensive part and run only when you ask or when a live skill's items
+  change. `ALPHA_CLAUDE_BASE_URL` can point at a local proxy (such as CLIProxyAPI) that serves a Claude
+  subscription instead of the pay-per-token API.
+- omp (your own login, not Alpha's key): each Have an idea turn is one omp session turn with tools (cache-heavy,
+  about $0.10 on the first turn, less after), and Implement is an omp run of up to 30 minutes.
 - Source reads are free: X and GitHub trending through their web pages, Substack, papers, GitHub, and Hugging Face
   through public APIs or your own sign-in.
 

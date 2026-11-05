@@ -18,6 +18,7 @@ TOOLS = {
     "lightpanda": ("source x (headless browser)", "brew install lightpanda-io/browser/lightpanda"),
     "gh": ("[project_github] specs read from GitHub", "brew install gh && gh auth login"),
     "claude": ("skill test runs (Claude Code)", "npm install -g @anthropic-ai/claude-code"),
+    "omp": ("the Have an idea chat and Implement (omp agents with your MCP servers and skills)", "https://omp.sh"),
 }
 CONTEXT_FEEDS = {
     "agents": [Path.home() / ".omp" / "agent" / "history.db", Path.home() / ".claude" / "projects"],

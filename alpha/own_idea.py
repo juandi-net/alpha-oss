@@ -17,8 +17,8 @@ One chat per item; Start over clears it (the suggestion it made stays).
 import json
 import sqlite3
 
-from . import writer
-from .config import Settings
+from . import omp_agent, writer
+from .config import TOOL_ROOT, Settings
 from .pipeline import project_texts
 from .storage import now, set_metadata
 from .taste import RATED_AT
@@ -26,6 +26,7 @@ from .taste import RATED_AT
 BASIS_KIND = "user"
 MIN_CHARACTERS = 3
 PROJECT_CHARACTERS = 4000
+TURN_SECONDS = 10 * 60  # one answer, tools included
 
 
 def projects(connection: sqlite3.Connection) -> list[str]:
@@ -83,14 +84,24 @@ def send(connection: sqlite3.Connection, settings: Settings, item_id: str, proje
     if item is None:
         raise ValueError(f"no item {item_id}")
     messages.append({"role": "user", "content": text})
-    plan = writer.plan_idea(settings.claude_model, item, project,
-                            project_texts(connection).get(project, "(no description)")[:PROJECT_CHARACTERS], messages)
+    project_text = project_texts(connection).get(project, "(no description)")[:PROJECT_CHARACTERS]
+    session = chat["session"] if chat else None
+    prompt = text
+    if chat and not session:  # a chat from before turns ran as omp sessions: its history opens the session
+        prompt = (f"This conversation started before you had tools. So far:\n\n{transcript(messages[:-1])}\n\n"
+                  f"Your current plan:\n{chat['plan']}\n\nNow the user says: {text}")
+    from .implement import repository  # here: implement.py reads this module's chats for its agent
+    answer, session = omp_agent.run(
+        prompt, cwd=repository(settings, project) or TOOL_ROOT, model=settings.claude_model,
+        time_limit=TURN_SECONDS, system=writer.idea_system(item, project, project_text), resume=session, read_only=True,
+    )
+    plan = writer.parse_idea_plan(answer)
     messages.append({"role": "assistant", "content": plan.model_dump_json()})
     connection.execute(
-        "INSERT INTO idea_chats (item_id, project, messages, plan, updated_at) VALUES (?, ?, ?, ?, ?) "
+        "INSERT INTO idea_chats (item_id, project, messages, plan, session, updated_at) VALUES (?, ?, ?, ?, ?, ?) "
         "ON CONFLICT(item_id) DO UPDATE SET messages = excluded.messages, plan = excluded.plan, "
-        "updated_at = excluded.updated_at",
-        (item_id, project, json.dumps(messages, ensure_ascii=False), plan.model_dump_json(), now()),
+        "session = excluded.session, updated_at = excluded.updated_at",
+        (item_id, project, json.dumps(messages, ensure_ascii=False), plan.model_dump_json(), session, now()),
     )
     connection.commit()
 

@@ -142,12 +142,14 @@ CREATE TABLE IF NOT EXISTS skill_chats (
 );
 
 -- A conversation shaping the user's own idea for an item in a project (the dashboard's Have an idea, own_idea.py),
--- kept after it became a suggestion so Implement can read how it was shaped; Start over deletes it.
+-- one omp session (omp_agent.py), kept after it became a suggestion so Implement can read how it was shaped; Start
+-- over deletes it.
 CREATE TABLE IF NOT EXISTS idea_chats (
     item_id TEXT PRIMARY KEY REFERENCES items(id),
     project TEXT NOT NULL,
     messages TEXT NOT NULL,          -- JSON list of {role, content}; an assistant content is an IdeaPlan as JSON
     plan TEXT NOT NULL,              -- the latest IdeaPlan as JSON
+    session TEXT,                    -- the omp session the chat goes on in (NULL: written before turns were omp sessions)
     suggested_at TEXT,               -- when the plan became the (item, project) suggestion
     updated_at TEXT NOT NULL
 );
@@ -387,6 +389,7 @@ ADDED_COLUMNS = {
     "candidates": {"examples": ("TEXT", None), "idea_judge": ("TEXT", None)},
     "items": {"tier": ("TEXT", "UPDATE items SET tier = 'find' WHERE trust = 'discovered'")},
     "taste_profiles": {"sources": ("TEXT", None)},
+    "idea_chats": {"session": ("TEXT", None)},
     "suggestions": {"headline": ("TEXT", None), "outcome": ("TEXT", None), "effort": ("TEXT", None),
                     **{name: (kind, None) for name, kind in (
                         ("implement_status", "TEXT"), ("implement_branch", "TEXT"), ("implement_base", "TEXT"),

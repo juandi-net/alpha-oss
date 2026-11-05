@@ -1,13 +1,13 @@
-"""Implement a suggestion: a headless Claude Code agent carries out its how in the project's own repository, on a
-new branch in a separate worktree, and reports; Alpha then commits the change on that branch itself.
+"""Implement a suggestion: a headless omp agent (omp_agent.py) carries out its how in the project's own repository,
+on a new branch in a separate worktree, and reports; Alpha then commits the change on that branch itself.
 
 The user's working folder is never touched: the branch alpha/<slug> starts from the repository's current HEAD
-(uncommitted changes there are not included) in var/worktrees/<project>-<slug>. The agent runs like the skill
-test agent (skill_test.environment: the same Claude account, no MCP servers, don't-ask mode) with `claude_model`,
-and without the user's own Claude Code settings (their hooks would keep a finished agent going); it may only read,
-edit files in the worktree, fetch pages, and run the project's tests, checks, and dependency installs: no commit,
-no push, no deploy. Alpha commits as the user (their git identity and hooks, no trailers) with "Alpha: <headline>";
-nothing is pushed, deployed, published, sent, or bought.
+(uncommitted changes there are not included) in var/worktrees/<project>-<slug>. The agent is an omp session with
+`claude_model`, so it has the user's MCP servers (Alpha's own search, Interface Lineage, browsers, ...) and skills;
+it is told to read, edit files in the worktree, and run the project's tests, checks, and dependency installs, and
+not to commit, push, deploy, send, or buy (omp has no hard deny-list for commands: the rules, the worktree, and the
+time limit are the guard). Alpha commits as the user (their git identity and hooks, no trailers) with
+"Alpha: <headline>"; nothing is pushed, deployed, published, sent, or bought by Alpha.
 
 The agent is given the suggestion, the source item, the project's spec and focus brief, and the user's Ask about
 this conversation (suggestion_chat.py), whose decisions and constraints take precedence over the suggestion.
@@ -19,11 +19,8 @@ One implementation at a time: each waits for var/implement.lock (the Mac is shor
 """
 
 import fcntl
-import json
-import os
 import re
 import shutil
-import signal
 import sqlite3
 import subprocess
 import traceback
@@ -31,10 +28,9 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from . import focus, own_idea, suggestion_chat, writer
+from . import focus, omp_agent, own_idea, suggestion_chat, writer
 from .config import TOOL_ROOT, Settings
 from .projects import _local_file, _repository_spec
-from .skill_test import OUTPUT_TAIL_CHARACTERS, environment
 from .skills import slug
 from .storage import content_of, now
 
@@ -48,23 +44,11 @@ BRANCH_WORDS = 6
 BRANCH_CHARACTERS = 40
 ITEM_CHARACTERS = 20_000
 SPEC_CHARACTERS = 6000
-# Reading and editing in the worktree, reading the web, and the commands a project's tests, checks, and dependency
-# installs need. Anything else (git commit or push, gh, deploy tools, other scripts) is refused in don't-ask mode.
+# Commands a project's tests, checks, and dependency installs usually need; named to the agent as examples.
 CHECK_COMMANDS = (
-    "cd", "git status", "git diff", "git log", "git show", "ls",
-    "uv run pytest", "uv run python -m pytest", "uv run -m pytest", "uv run python -m unittest", "uv run test.py",
-    "uv run ruff", "uv run mypy", "uv run pyright", "uv sync", "uvx ruff",
-    "pytest", "python -m pytest", "python3 -m pytest", "python -m unittest", "python3 -m unittest",
-    "npm test", "npm run test", "npm run lint", "npm run typecheck", "npm run check", "npm install", "npm ci",
-    "npx tsc", "npx vitest", "npx eslint", "npx jest",
-    "bun test", "bun run test", "bun run lint", "bun run typecheck", "bun run check", "bun install",
-    "bunx tsc", "bunx vitest", "bunx eslint",
-    "cargo test", "cargo check", "go test", "go vet", "make test", "make check",
+    "uv run pytest", "uv run ruff", "uv sync", "pytest", "npm test", "npm run lint", "npm install", "npx tsc",
+    "bun test", "bun install", "cargo test", "cargo check", "go test", "make test",
 )
-AGENT_TOOLS = " ".join(["Read", "Glob", "Grep", "Edit", "Write", "WebFetch", "WebSearch",
-                        *(f"Bash({command}:*)" for command in CHECK_COMMANDS)])
-REFUSED_TOOLS = ("Bash(git commit:*) Bash(git push:*) Bash(git reset:*) Bash(git checkout:*) Bash(gh:*) "
-                 "Bash(vercel:*) Bash(npm publish:*)")
 AGENT_PROMPT = """You are carrying out one suggestion in the user's project {project}. You are in a git worktree of \
 its repository, on the new branch {branch}; the user's own working folder is elsewhere and stays untouched.
 
@@ -79,9 +63,10 @@ How (start here): {action}
 step well, in the project's own style and structure, in as few files as you can. Read only what you need (search, \
 then read the parts that matter): your context is limited.
 - Work only in this folder: read, edit, and create files here.
-- Run the project's existing tests or checks, if any (see package.json, pyproject.toml, Makefile, the README). You \
-may install its dependencies in this folder. Only these commands are allowed (each with its own arguments): \
-{commands}. If the project's check needs another command, do not try it; give it in your report.
+- Run the project's existing tests or checks, if any (see package.json, pyproject.toml, Makefile, the README), and \
+install its dependencies in this folder if they are missing; for example {commands}. Use your MCP servers and skills \
+when they help (Alpha's own search and get_item for the source item and what else the user collected, a browser to \
+look at the result, Interface Lineage for interaction design); never to send, post, publish, or buy.
 - Do not commit, push, deploy, publish, send, sign up, or buy anything, and change nothing outside this folder. \
 Alpha commits your changes on this branch after you finish, and the user reviews them.
 - Do not ask questions: make sensible choices and say what you assumed.
@@ -351,30 +336,12 @@ def diff(suggestion: sqlite3.Row) -> tuple[str, str]:
 
 
 def _agent(folder: Path, prompt: str, model: str) -> str:
-    """The agent's report (its final message). Stopped at TIME_LIMIT_SECONDS with its whole process group."""
-    command = [
-        shutil.which("claude", path=environment()["PATH"]) or "claude", "-p", prompt,
-        "--model", model, "--strict-mcp-config", "--setting-sources", "project,local", "--permission-mode", "dontAsk",
-        "--allowedTools", AGENT_TOOLS, "--disallowedTools", REFUSED_TOOLS, "--output-format", "json",
-    ]
-    process = subprocess.Popen(command, cwd=folder, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-                               env=environment(), stdin=subprocess.DEVNULL, start_new_session=True)
+    """The agent's report (its final message), from one omp session in the worktree. Stopped at
+    TIME_LIMIT_SECONDS with its whole process group."""
     try:
-        printed, errors = process.communicate(timeout=TIME_LIMIT_SECONDS)
-    except subprocess.TimeoutExpired:
-        os.killpg(process.pid, signal.SIGTERM)
-        process.communicate()
-        raise Failure(f"The agent did not finish within {TIME_LIMIT_SECONDS // 60} minutes; its unfinished changes "
-                      f"are left uncommitted in {folder}.") from None
-    try:
-        answer = json.loads(printed)
-    except json.JSONDecodeError:
-        raise Failure(f"The agent stopped (exit {process.returncode}): "
-                      f"{(errors or printed).strip()[-OUTPUT_TAIL_CHARACTERS:]}") from None
-    report = (answer.get("result") or "").strip()
-    if process.returncode != 0 or answer.get("is_error") or not report:
-        raise Failure(f"The agent stopped ({answer.get('subtype') or f'exit {process.returncode}'}): "
-                      f"{(report or errors).strip()[-OUTPUT_TAIL_CHARACTERS:]}")
+        report, _ = omp_agent.run(prompt, cwd=folder, model=model, time_limit=TIME_LIMIT_SECONDS)
+    except omp_agent.AgentError as error:
+        raise Failure(f"{error}; unfinished changes are left uncommitted in {folder}.") from None
     return report
 
 
@@ -409,7 +376,7 @@ def run(connection: sqlite3.Connection, settings: Settings, item_id: str, projec
             _set(connection, item_id, project, branch=chosen.branch, base=base, path=str(chosen.worktree))
             print(f"Implement: {project}: {chosen.headline} on {chosen.branch} in {chosen.worktree}", flush=True)
             prompt = AGENT_PROMPT.format(**_context(connection, chosen))
-            report = _agent(chosen.worktree, prompt, writer.resolve_model(settings.claude_model))
+            report = _agent(chosen.worktree, prompt, settings.claude_model)
             _set(connection, item_id, project, report=report)
             files = _commit(chosen.worktree, base, chosen.headline, chosen.item)
             _set(connection, item_id, project, status="implemented", files=files, finished_at=now())

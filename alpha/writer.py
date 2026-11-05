@@ -14,6 +14,7 @@ import base64
 import json
 import os
 import random
+import re
 import sqlite3
 from collections.abc import Iterable
 from functools import cache
@@ -437,25 +438,44 @@ class IdeaPlan(BaseModel):
     effort: str = Field(description="small | medium | large")
 
 
-def plan_idea(model: str, item: sqlite3.Row, project_name: str, project_text: str, messages: list[dict]) -> IdeaPlan:
-    """One turn of the idea chat (the user's own idea for the item in the project). messages alternate user and
-    assistant, starting with the user's idea."""
-    system = (
-        f"{IDEA_CHAT_SYSTEM}\n\nProject: {project_name}\n\nWhat the project is and what the user is working on:\n"
-        f"{project_text}\n\n---\n\n"
+IDEA_PLAN_FORMAT = (
+    "You are an omp session with read-only tools: reading and searching files in your working folder (the project's "
+    "repository when Alpha knows it), the web, and your MCP servers (Alpha's own search and get_item for what the "
+    "user has collected, Interface Lineage for interaction design, and the rest). Use them when they make the idea "
+    "better, and say what you found. This is a conversation, not a build: you cannot and must not create files, "
+    "run commands, or open anything; describe, do not make. Do not draft into local:// scratch either: nothing "
+    "outside your reply reaches the user, so a plan that points at a file is a plan that points at nothing.\n\n"
+    "Format: end every answer with exactly one fenced ```json block holding the plan, with these keys: reply (what "
+    "the user reads: your reading of the idea, the sharpenings and why, then any questions, each on its own numbered "
+    "line; plain text, no Markdown), ready (boolean), core (one sentence), polish (list of up to three one-line "
+    "strings), headline, outcome, action, effort (small | medium | large). Nothing after the block; the user sees "
+    "only the reply field, so put everything you want to say there."
+)
+
+
+def idea_system(item: sqlite3.Row, project_name: str, project_text: str) -> str:
+    """The idea chat's instructions and context, appended to the omp agent's system prompt (own_idea.py)."""
+    return (
+        f"{IDEA_CHAT_SYSTEM}\n\n{IDEA_PLAN_FORMAT}\n\nProject: {project_name}\n\nWhat the project is and what the user "
+        f"is working on:\n{project_text}\n\n---\n\n"
         f"Item ({item['kind']}): {item['title'] or item['title_source'] or item['url']}\n{item['summary'] or ''}\n\n"
         f"{item_text(item)[:SUMMARY_ITEM_CHARACTERS]}"
     )
-    response = _client().messages.parse(
-        model=resolve_model(model), max_tokens=MAX_TOKENS * 2, system=system, messages=messages, output_format=IdeaPlan,
-    )
-    plan = response.parsed_output
-    if plan is None:
-        raise RuntimeError(f"no plan in the answer (stop reason {response.stop_reason})")
+
+
+def parse_idea_plan(text: str) -> IdeaPlan:
+    """The plan from the agent's answer: its last fenced json block (or the whole answer when it is bare JSON)."""
+    blocks = re.findall(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
+    raw = blocks[-1] if blocks else text.strip()
+    try:
+        plan = IdeaPlan.model_validate_json(raw)
+    except ValueError as error:
+        raise RuntimeError(f"no plan in the answer: {str(error)[:200]}") from None
     effort = plan.effort.strip().lower()
     return plan.model_copy(update={
         "headline": plan.headline.strip().rstrip("."), "outcome": plan.outcome.strip(), "action": plan.action.strip(),
         "effort": effort if effort in ("small", "medium", "large") else "medium",
+        "polish": [line.strip() for line in plan.polish if line.strip()][:3],
     })
 
 
