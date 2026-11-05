@@ -3,8 +3,9 @@ against the user's focus briefs and their taste, so a post they would want shows
 
 Signed in with the user's Substack session: SUBSTACK_SID in .env, the `substack.sid` cookie of a logged-in
 substack.com tab. The cookie is sent in exactly one request per run, to substack.com only (no redirects followed):
-- `GET substack.com/api/v1/subscriptions?tvOnly=false` lists the publications the account subscribes to
-  (`publications`: name, subdomain, custom domain). 401 without a session (checked 2026-11-04).
+- `GET substack.com/api/v1/subscriptions/page_v2` lists the publications the account subscribes to, as the
+  Substack app does (`publications`: name, subdomain, custom domain). 401 without a session (checked 2026-11-04;
+  the older `/api/v1/subscriptions?tvOnly=false` misses most of them).
 Everything else is read anonymously through the substack source's client and public endpoints:
 - `<publication>/api/v1/archive?sort=new&offset=0&limit=per_publication` lists each publication's newest posts;
 - `<publication>/api/v1/posts/<slug>` gives a post's text for stage 2 (substack.read_post: the whole post when
@@ -49,7 +50,7 @@ CONFIG = {
     "per_publication": 10,          # newest posts listed per publication and run
 }
 
-SUBSCRIPTIONS_URL = "https://substack.com/api/v1/subscriptions"
+SUBSCRIPTIONS_URL = "https://substack.com/api/v1/subscriptions/page_v2"
 ARCHIVE_MAX_AGE_DAYS = 0.5
 OVERLAP = timedelta(hours=1)        # each window starts this long before the last complete listing ended
 LISTED_KEY = f"{NAME}:listed_through"
@@ -74,7 +75,7 @@ def subscriptions() -> list[dict]:
     """The publications the user subscribes to, as {name, base_url}. The one request that carries the session."""
     sid = os.environ.get("SUBSTACK_SID", "").strip()
     response = httpx.get(
-        SUBSCRIPTIONS_URL, params={"tvOnly": "false"}, headers=HEADERS | {"Accept": "application/json"},
+        SUBSCRIPTIONS_URL, headers=HEADERS | {"Accept": "application/json"},
         cookies={"substack.sid": sid, "connect.sid": sid}, follow_redirects=False, timeout=30,
     )
     if response.status_code in (401, 403) or response.is_redirect:
