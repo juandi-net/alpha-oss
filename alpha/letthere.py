@@ -156,21 +156,29 @@ def mirror(connection: sqlite3.Connection, note: dict) -> bool:
     onto its suggestion's implement_* columns, so the Ideas tab and Review changes show it. Returns whether the
     suggestion exists."""
     item_id = item_id_of(note)
-    row = connection.execute("SELECT project, implement_status, status FROM suggestions WHERE item_id = ?",
-                             (item_id,)).fetchone()
+    row = connection.execute("SELECT project, implement_status, implement_branch, status FROM suggestions "
+                             "WHERE item_id = ?", (item_id,)).fetchone()
     if row is None:
         return False
     status = BUILD_STATUS.get(str(note.get("status") or ""))
     if note.get("status") == "done" and row["status"] != "done":
         connection.execute("UPDATE suggestions SET status = 'done' WHERE item_id = ?", (item_id,))
-    if status or note.get("branch"):
+    theirs = str(note.get("branch") or "").startswith("letthere/")
+    ours = str(row["implement_branch"] or "").startswith("alpha/")
+    if theirs or (status and not ours):
         connection.execute(
             "UPDATE suggestions SET implement_status = ?, implement_branch = ?, implement_base = ?, implement_path = ?, "
             "implement_files = ?, implement_report = ?, implement_error = ?, implement_started_at = ?, "
             "implement_finished_at = ? WHERE item_id = ?",
-            (status or row["implement_status"], note.get("branch"), note.get("base"), note.get("worktree"),
-             note.get("files"), note.get("report"), note.get("error"), note.get("started"), note.get("finished"), item_id),
+            (status, note.get("branch"), note.get("base"), note.get("worktree"), note.get("files"),
+             note.get("report"), note.get("error"), note.get("started"), note.get("finished"), item_id),
         )
+    elif note.get("status") == "new" and not ours and row["implement_status"]:
+        # Let There removed its build (the note is new again): nothing to show until it builds again
+        connection.execute(
+            "UPDATE suggestions SET implement_status = NULL, implement_branch = NULL, implement_base = NULL, "
+            "implement_path = NULL, implement_files = NULL, implement_report = NULL, implement_error = NULL, "
+            "implement_started_at = NULL, implement_finished_at = NULL WHERE item_id = ?", (item_id,))
     connection.commit()
     return True
 
