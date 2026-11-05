@@ -34,8 +34,8 @@ SOURCE = "letthere"
 BASIS_KIND = "note"
 HEADLINE_WORDS = 12
 TIMEOUT = 10
-# A note's status (Let There) as Alpha's implement_status.
-BUILD_STATUS = {"implementing": "implementing", "implemented": "implemented", "failed": "failed"}
+# A note's status (Let There) as Alpha's implement_status; live (landed in the app) is implemented and marked done.
+BUILD_STATUS = {"implementing": "implementing", "implemented": "implemented", "live": "implemented", "failed": "failed"}
 
 
 def item_id_of(note: dict) -> str:
@@ -161,7 +161,7 @@ def mirror(connection: sqlite3.Connection, note: dict) -> bool:
     if row is None:
         return False
     status = BUILD_STATUS.get(str(note.get("status") or ""))
-    if note.get("status") == "done" and row["status"] != "done":
+    if note.get("status") in ("done", "live") and row["status"] != "done":
         connection.execute("UPDATE suggestions SET status = 'done' WHERE item_id = ?", (item_id,))
     theirs = str(note.get("branch") or "").startswith("letthere/")
     ours = str(row["implement_branch"] or "").startswith("alpha/")

@@ -6,6 +6,7 @@ import os
 import plistlib
 import shutil
 import subprocess
+import sys
 import time
 from pathlib import Path
 
@@ -108,6 +109,19 @@ def _plists() -> dict[str, dict]:
 
 def _launchctl(*arguments: str) -> subprocess.CompletedProcess:
     return subprocess.run(["launchctl", *arguments], capture_output=True, text=True)
+
+
+def start_detached(command: str, *arguments: str) -> None:
+    """Run a CLI command (`alpha skills ...`, `alpha implement ...`, `alpha process`) detached, so a build, an
+    implementation, or the processing of a new item outlives the request that started it; output goes to
+    var/logs/<command>.log."""
+    log_path = TOOL_ROOT / "var" / "logs" / f"{command}.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    with log_path.open("a") as log:
+        subprocess.Popen(
+            [str(Path(sys.executable).parent / "alpha"), command, *arguments],
+            cwd=TOOL_ROOT, stdout=log, stderr=subprocess.STDOUT, start_new_session=True,
+        )
 
 
 def _unload(service: str) -> None:

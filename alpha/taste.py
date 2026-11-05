@@ -22,7 +22,7 @@ RATED = 100                      # newest α and newest β ratings the profile i
 ITEM_CHARACTERS = 400
 MIN_PICKED = 20
 # How each curated source's items are named to Claude and the judges; a source not listed goes by its name.
-PICKED_AS = {"x": "X bookmark", "github_stars": "GitHub star", "hf_likes": "Hugging Face like"}
+PICKED_AS = {"x": "X bookmark", "github_stars": "GitHub star", "hf_likes": "Hugging Face like", "link": "link you added"}
 EXAMPLES = 3
 # α: a real edge, kept. β: no edge (generic, slop, or already known; in finance beta is what everyone gets).
 RATINGS = ("alpha", "beta")

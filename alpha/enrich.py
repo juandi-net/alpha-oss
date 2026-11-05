@@ -25,7 +25,7 @@ def media_directory(settings: Settings) -> Path:
     return settings.database_path.parent / "media"
 
 
-def _host(url: str) -> str:
+def host_of(url: str) -> str:
     host = urlparse(url).hostname or ""
     return host.removeprefix("www.").removeprefix("m.")
 
@@ -45,7 +45,7 @@ def fetch_links(connection: sqlite3.Connection) -> None:
     for row in connection.execute("SELECT id, links FROM items"):
         for link in json.loads(row["links"]):
             url = link["url"]
-            if _host(url) in SKIPPED_HOSTS:
+            if host_of(url) in SKIPPED_HOSTS:
                 continue
             exists = connection.execute(
                 "SELECT 1 FROM content WHERE item_id = ? AND kind = 'link' AND key = ?", (row["id"], url)

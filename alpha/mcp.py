@@ -1,7 +1,8 @@
 """Alpha as an MCP server (stdio): `alpha mcp`. Lets any agent chat "check Alpha for X".
 
-Every tool reads the warehouse only, through a read-only SQLite connection; `request` is the one write (a row in
-`requests`, which the next `alpha run` searches every enabled discovered source for). Agents never call sources.
+Every tool reads the warehouse only, through a read-only SQLite connection, but two: `request` writes a row in
+`requests` (which the next `alpha run` searches every enabled discovered source for), and `add` stores a page the
+user found as a curated item (links.py) and starts `alpha process` for it. Agents never call sources.
 Answers are short briefs an agent can use correctly, after Interface Lineage's MCP: every search result says what
 the item is, who vouches for it (saved by you / found by Alpha), why it matters, the projects it fits and the
 user's α / β rating; `get_item` and `project_context` open with a "Brief for your answer" (claim, why it matters,
@@ -58,12 +59,13 @@ OWN_RESULT = re.compile(r"\b(i|i'm|i've|we|we've|my|our|tested|measured|benchmar
 # (e.g. https://interfacelineage.com/grace-window-undo: Claim, Suggest next, then this line).
 OWN_LINE = "Mark anything you add from outside Alpha as your own."
 
-INSTRUCTIONS = """Alpha is the user's warehouse of curated items (their X bookmarks, GitHub stars, Hugging Face likes) \
-and items Alpha discovered and judged (Substack articles, papers, datasets, models, repos), each summarized and \
-matched to the user's projects, plus the agent skills built from them. Use `search` when the user says "check Alpha \
-for ..."; `get_item` for the brief \
+INSTRUCTIONS = """Alpha is the user's warehouse of curated items (their X bookmarks, GitHub stars, Hugging Face likes, \
+links they added) and items Alpha discovered and judged (Substack articles, papers, datasets, models, repos), each \
+summarized and matched to the user's projects, plus the agent skills built from them. Use `search` when the user says \
+"check Alpha for ..."; `get_item` for the brief \
 and full text of a result; `project_context` before working on a project; `request` when Alpha has nothing on a \
-topic (discovery then runs on its next scheduled run). Answers are briefs: lean on the claim, quote and evidence \
+topic (discovery then runs on its next scheduled run); `add` when the user hands you a link that has alpha in it \
+("add this to Alpha"), with their words on why as the note. Answers are briefs: lean on the claim, quote and evidence \
 they give, cite items by url, and mark anything you add from outside Alpha as your own."""
 
 server = MCPServer("alpha", instructions=INSTRUCTIONS)
@@ -725,6 +727,37 @@ def request(query: str, project: str | None = None) -> str:
         return f"Request {request_id} for '{query}' is already {status} ({names}); {_next_run()}."
     return (f"Filed request {request_id}: '{query}'{f' for {project}' if project else ''}. Alpha searches "
             f"{names} for it {_next_run()}. The judge admits only what is worth keeping; finds show up in `search`.")
+
+
+@server.tool()
+def add(url: str, note: str | None = None, project: str | None = None) -> str:
+    """Add a page the user found to Alpha, as the strongest signal there is: a curated item at the top of their Feed,
+    rated α at once, read now (its text is kept), and, with `project`, pinned to that project with a full-score match
+    so a suggestion for it follows. `note` is the user's own words on why it is alpha: it becomes the item's words
+    and the match reason. Processing (summary, category, matches, suggestions) starts in the background and takes
+    about a minute; `get_item` shows the item meanwhile. Returns the item id and what happened."""
+    from . import links
+    from .install import start_detached
+    from .storage import connect
+
+    with _warehouse() as (settings, connection):
+        name = links.project_named(connection, project)
+        if project and name is None:
+            return (f"Alpha has no project spec named '{project}' to pin to. Projects with a spec: "
+                    f"{', '.join(row[0] for row in connection.execute('SELECT name FROM projects ORDER BY name')) or 'none'}.")
+    connection = connect(settings.database_path)
+    try:
+        added = links.add(connection, url, note, name)
+    except ValueError as error:
+        return str(error)
+    finally:
+        connection.close()
+    start_detached("process")
+    what = "Added" if added.new else "Already in Alpha (now rated α)"
+    read = f"{added.text_characters:,} characters read" if not added.error else f"page not read: {added.error}"
+    return (f"{what}: {added.title} ({added.kind}, id {added.item_id}; {read}"
+            f"{f'; pinned to {name}' if name else ''}). Alpha is processing it now; its summary, matches, and "
+            f"suggestions show in `get_item('{added.item_id}')` in about a minute.")
 
 
 def main() -> None:

@@ -30,7 +30,6 @@ import re
 import shlex
 import sqlite3
 import subprocess
-import sys
 from collections import defaultdict
 from datetime import UTC, date, datetime, timedelta
 from html import escape
@@ -39,9 +38,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, parse_qsl, quote, unquote, urlencode, urlparse
 
-from . import focus, implement, letthere, own_idea, skill_chat, suggestion_chat, taste
-from .config import TOOL_ROOT, Settings, load_settings
-from .install import RUN_INTERVAL_SECONDS
+from . import focus, implement, letthere, links, own_idea, skill_chat, suggestion_chat, taste
+from .config import Settings, load_settings
+from .install import RUN_INTERVAL_SECONDS, start_detached
 from .render import duplicates_by_original
 from .skills import (attempts_of, diff, failure, last_failed, last_problems, live_version, members, overlaps, remove,
                      retry_due, slug, versions)
@@ -79,7 +78,7 @@ SOURCE_LABELS = {"x": "X bookmarks", "x_timeline": "X timeline", "substack": "Su
                  "huggingface": "Hugging Face datasets", "hf_likes": "Hugging Face likes",
                  "hf_following": "Hugging Face follows", "papers": "Papers", "arxiv": "arXiv",
                  "github_trending": "GitHub trending", "hf_trending": "Hugging Face trending",
-                 "substack_following": "Substack subscriptions", "letthere": "Let There notes"}
+                 "substack_following": "Substack subscriptions", "letthere": "Let There notes", "link": "Links you added"}
 X_SOURCES = ("x", "x_timeline")
 # Where on X a timeline find came from (candidates.query of an x_timeline candidate).
 TIMELINE_TABS = {"following": "from your Following", "for_you": "from For You"}
@@ -347,9 +346,9 @@ def _layout(connection: sqlite3.Connection, settings: Settings, view: str, title
     )
     keys = "".join(f"<dt><kbd>{escape(key)}</kbd></dt><dd>{escape(what)}</dd>" for key, what in KEYS)
     go = escape(json.dumps({key: href for key, href, _ in GO_KEYS}))
-    # Let There (its own tool): point at something on the Feed, press ], say what should change.
+    # Let There (its own tool): point at anything on any page, press ], say what should change; it happens.
     let_there = (f'\n<script src="{escape(settings.let_there_url)}/overlay.js" data-app="alpha" defer></script>'
-                 if settings.let_there_url and view == "feed" else "")
+                 if settings.let_there_url else "")
     return f"""<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
@@ -962,6 +961,42 @@ def _ask_form(connection: sqlite3.Connection, settings: Settings, query: str = "
         '<p class="note">Next you see what Alpha will search and when, before anything is filed; the judge keeps '
         "only what is specific, proven, and usable now.</p></form>"
     )
+
+
+def _add_form(connection: sqlite3.Connection) -> str:
+    """The form that adds a page you found (POST /links, links.add): stored as yours at the top of the Feed, rated α,
+    read at once, and pinned to a project with a spec when one is chosen."""
+    choices = "".join(f'<option value="{escape(row["name"])}">{escape(row["name"])}</option>'
+                      for row in connection.execute("SELECT name FROM projects ORDER BY name"))
+    return (
+        '<form class="ask" method="post" action="/links">'
+        '<input name="url" type="url" placeholder="https://… a page with alpha in it" required aria-label="The page">'
+        f'<select name="project" aria-label="Pin to which project"><option value="">No project pin</option>{choices}</select>'
+        '<input name="note" placeholder="Why it is alpha (optional): becomes its words and the match reason" '
+        'aria-label="Why it is alpha">'
+        '<button class="primary">Add to Alpha</button>'
+        '<p class="note">The page is read now and goes to the top of the Feed rated α; the summary, matches, and a '
+        "suggestion per match follow in a minute (a background <code>alpha process</code>).</p></form>"
+    )
+
+
+def _added_notice(connection: sqlite3.Connection, item_id: str, again: bool) -> str:
+    """What became of the link just added (HTML): the item, its pin, and whether it is summarized yet; `again` when
+    Alpha already held the URL (then it was rated α and pinned, not stored twice)."""
+    row = connection.execute("SELECT id, kind, title, title_source, url, summary FROM items WHERE id = ?",
+                             (item_id,)).fetchone()
+    if row is None:
+        return "Added."
+    pins = [r["project"] for r in connection.execute(
+        "SELECT project FROM relevance WHERE item_id = ? AND score >= ? ORDER BY project", (item_id, links.PINNED_SCORE))]
+    title = escape(row["title"] or row["title_source"] or row["url"])
+    state = ("summarized; its matches and suggestions follow" if row["summary"]
+             else "being read: the summary, matches, and suggestions show on its page in a minute")
+    pinned = f", pinned to {escape(', '.join(pins))}" if pins else ""
+    link = f'<a href="/item/{quote(row["id"])}">{title}</a> ({escape(row["kind"])}{pinned})'
+    if again:
+        return f"Already in Alpha: {link}, now rated α; {state}."
+    return f"Added {link} at the top of the Feed, rated α; {state}."
 
 
 def _today() -> str:
@@ -2099,9 +2134,10 @@ def ideas_page(settings: Settings, seen: str) -> str:
         connection.close()
 
 
-def requests_page(settings: Settings, seen: str, notice: str = "", error: str = "") -> str:
-    """What you and your agents asked discovery to look for, open first, with what each request admitted, and the
-    form that files a new one."""
+def requests_page(settings: Settings, seen: str, notice: str = "", error: str = "", added: str = "",
+                  again: bool = False, add_error: str = "") -> str:
+    """What you and your agents asked discovery to look for, open first, with what each request admitted, the form
+    that files a new one, and the form that adds a page you found (links.py)."""
     connection = _connect(settings)
     try:
         rows = connection.execute(
@@ -2137,10 +2173,16 @@ def requests_page(settings: Settings, seen: str, notice: str = "", error: str = 
         done_rows = [row for row in rows if row["status"] == "done"]
         said = (f'<p class="error">{escape(error)}</p>' if error else "") + (
             f'<p class="notice">{escape(notice)}</p>' if notice else "")
+        add_said = (f'<p class="error">{escape(add_error)}</p>' if add_error else "") + (
+            f'<p class="notice">{_added_notice(connection, added, again)}</p>' if added else "")
         main = (
             '<header class="page-head"><h1>Requests</h1><p>What you and your agents asked Alpha to look for. Each run '
             "searches every enabled discovered source for the open ones, judges what it finds, and lists what it kept "
-            f'under the request.</p></header><section class="panel ask-panel" id="ask"><h4>Ask Alpha</h4>'
+            f'under the request.</p></header><section class="panel ask-panel" id="add"><h4>Add a link</h4>'
+            f"{_add_form(connection)}{add_said}"
+            '<p class="note">Agents add links over MCP with the <code>add</code> tool; <code>alpha add &lt;url&gt;</code> '
+            "does the same from the terminal.</p></section>"
+            f'<section class="panel ask-panel" id="ask"><h4>Ask Alpha</h4>'
             f"{_ask_form(connection, settings, primary=True)}{said}"
             '<p class="note">Agents file the same requests over MCP with the <code>request</code> tool.</p></section>'
             f'<section><h2>Open <span class="n">{len(open_rows)}</span></h2>'
@@ -2764,15 +2806,7 @@ def review_page(settings: Settings, item_id: str, project: str, *, seen: str) ->
 
 
 def _start(*arguments: str, command: str = "skills") -> None:
-    """Run a CLI command (`alpha skills ...` or `alpha implement ...`) detached, so a build or an implementation
-    outlives the request; output goes to var/logs/<command>.log."""
-    log_path = TOOL_ROOT / "var" / "logs" / f"{command}.log"
-    log_path.parent.mkdir(parents=True, exist_ok=True)
-    with log_path.open("a") as log:
-        subprocess.Popen(
-            [str(Path(sys.executable).parent / "alpha"), command, *arguments],
-            cwd=TOOL_ROOT, stdout=log, stderr=subprocess.STDOUT, start_new_session=True,
-        )
+    start_detached(command, *arguments)
 
 
 NOT_FOUND = b"<!DOCTYPE html><title>Not found</title><p style='font:16px system-ui;padding:2em'>Not found. <a href='/'>Feed</a></p>"
@@ -2850,7 +2884,8 @@ class _Handler(BaseHTTPRequestHandler):
             filed = (f"Filed request {field('filed')}. The next run searches for it; what the judge keeps shows under "
                      "it below." if field("filed").isdigit() else
                      f"Already asked: request {field('open')} is still open." if field("open").isdigit() else "")
-            html = requests_page(settings, seen, filed, field("error"))
+            html = requests_page(settings, seen, filed, field("error"), field("added") or field("kept"),
+                                 bool(field("kept")), field("add_error"))
         elif path == "/requests/confirm":
             html = request_readback_page(settings, field("query"), field("project").strip(), self._back("/requests#ask"),
                                          seen=seen)
@@ -2968,6 +3003,33 @@ class _Handler(BaseHTTPRequestHandler):
         finally:
             connection.close()
         self._send(303, location=f"/requests?{'open' if status else 'filed'}={request_id}#ask")
+
+    def _links_action(self, form: dict[str, list[str]]) -> None:
+        """Add a page you found (links.add): read now, stored as yours rated α, pinned to the chosen project, then
+        `alpha process` in the background writes its summary, matches, and suggestions."""
+        settings = load_settings()
+        url = (form.get("url") or [""])[0].strip()
+        note = " ".join((form.get("note") or [""])[0].split()) or None
+        wanted = (form.get("project") or [""])[0].strip() or None
+        if not url:
+            self._send(303, location="/requests?" + urlencode({"add_error": "Give the page's address."}) + "#add")
+            return
+        connection = connect(settings.database_path)
+        try:
+            project = links.project_named(connection, wanted)
+            if wanted and project is None:
+                self._send(303, location="/requests?" + urlencode({"add_error": f"No project named {wanted} has a spec."})
+                           + "#add")
+                return
+            try:
+                added = links.add(connection, url, note, project)
+            except ValueError as error:
+                self._send(303, location="/requests?" + urlencode({"add_error": str(error)}) + "#add")
+                return
+        finally:
+            connection.close()
+        start_detached("process")
+        self._send(303, location=f"/requests?{'added' if added.new else 'kept'}={quote(added.item_id)}#add")
 
     def _back(self, default: str = "/") -> str:
         """The page a form was on (its Referer), or `default`."""
@@ -3142,6 +3204,9 @@ class _Handler(BaseHTTPRequestHandler):
             return
         if parts == ["requests"]:
             self._request_action(form)
+            return
+        if parts == ["links"]:
+            self._links_action(form)
             return
         if parts == ["seen"]:
             self._seen_action()

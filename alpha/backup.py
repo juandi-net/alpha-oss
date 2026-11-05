@@ -33,10 +33,10 @@ def backup(connection: sqlite3.Connection, settings: Settings) -> None:
     media = media_directory(settings)
     copied = 0
     if media.is_dir():
-        (directory / "media").mkdir(exist_ok=True)
-        for path in media.iterdir():
-            destination = directory / "media" / path.name
-            if not destination.exists():
+        for path in media.rglob("*"):  # var/media/<file> and Let There's var/media/letthere/<app>/<note>.png
+            destination = directory / "media" / path.relative_to(media)
+            if path.is_file() and not destination.exists():
+                destination.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy2(path, destination)
                 copied += 1
     print(f"Backup: {target.name} in {directory}" + (f", {copied} new images" if copied else ""))

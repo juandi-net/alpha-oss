@@ -1,4 +1,4 @@
-"""Command line: alpha {setup,install,uninstall,status,run,collect,discover,focus,process,render,serve,mcp,skills,
+"""Command line: alpha {setup,install,uninstall,status,run,collect,discover,add,focus,process,render,serve,mcp,skills,
 implement}."""
 
 import argparse
@@ -6,7 +6,7 @@ import os
 from datetime import UTC, datetime
 from types import ModuleType
 
-from . import enrich, focus, implement, judge, letthere, pipeline, skills
+from . import enrich, focus, implement, judge, letthere, links, pipeline, skills
 from .backup import backup
 from .config import TOOL_ROOT, Settings, load_settings, missing_secrets, require_secrets
 from .install import install, setup, uninstall
@@ -219,13 +219,19 @@ def main() -> None:
     discover = commands.add_parser("discover", help="run a discovered source now and judge what it finds")
     discover.add_argument("source", nargs="?")
     discover.add_argument("--max-requests", type=int, help="request budget for this run")
+    add = commands.add_parser("add", help="add a page you found (high signal: stored as yours, rated α, read now, "
+                              "then processed) and pin it to a project")
+    add.add_argument("url")
+    add.add_argument("--note", help="why it is alpha: becomes the item's own words and the match reason")
+    add.add_argument("--project", help="pin a full-score match to this project (a name from [projects])")
+    add.add_argument("--later", action="store_true", help="leave the summary, matches, and suggestions to the next run")
     commands.add_parser("focus", help="rewrite every focus brief now")
     commands.add_parser("process", help="summarize, classify, match, explain, index, and render")
     commands.add_parser("render", help="rebuild the vault pages from the database only")
     serve = commands.add_parser("serve", help="browser dashboard on localhost")
     serve.add_argument("--port", type=int, default=3460)
     commands.add_parser("mcp", help="MCP server (stdio) so agents can search the warehouse: search, get_item, "
-                        "project_context, list_projects, skills, suggestions, request")
+                        "project_context, list_projects, skills, suggestions, request, add")
     skill = commands.add_parser("skills", help="propose, build, test, and publish skills made from item topics")
     skill.add_argument(
         "action", nargs="?", default="list",
@@ -298,6 +304,21 @@ def main() -> None:
         finally:
             close_all()
             x_source.record_status(connection)
+    elif args.command == "add":
+        project = links.project_named(connection, args.project)
+        if args.project and project is None:
+            names = [row["name"] for row in connection.execute("SELECT name FROM projects ORDER BY name")]
+            raise SystemExit(f"No project named '{args.project}' has a spec. Projects: {', '.join(names) or 'none'}")
+        try:
+            added = links.add(connection, args.url, args.note, project)
+        except ValueError as error:
+            raise SystemExit(str(error)) from None
+        print(f"{'Added' if added.new else 'Already in Alpha, now rated α'}: {added.title} ({added.kind}, "
+              f"{added.item_id}; {added.text_characters:,} characters read"
+              + (f"; page not read: {added.error}" if added.error else "")
+              + (f"; pinned to {project}" if project else "") + ")")
+        if not args.later:
+            _process(settings, connection)
     elif args.command == "focus":
         require_secrets("claude")
         focus.refresh(connection, settings, force=True)

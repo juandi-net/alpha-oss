@@ -85,6 +85,17 @@ sources ──> (discovered only: judge) ──> warehouse (SQLite) ──> outp
   Each one is a row in the `requests` table (`query`, optional `project`, `created_at`). The next run searches every
   enabled discovered source for it, judges what it finds, and records how many items it admitted (`status` open →
   judging → done, `result_count`).
+- **Links you add**: a page you found that has alpha in it goes straight in, as the strongest signal there is:
+  `alpha add <url> [--note "why it is alpha"] [--project <name>]`, the Add a link form on the Requests tab, or the
+  MCP `add` tool ("add this to Alpha"). The page is read at once (`links.py`: its text is kept under the item, like a
+  star's README; a GitHub, arXiv, or Hugging Face address sets the kind), the item is stored as yours at the top of
+  the Feed and rated α on the spot (the taste profile learns from it; its suggestions come first), and with a
+  project it gets a full-score match there, so Jev never gets to disagree and a suggestion follows. The note becomes
+  the item's own words and, with a project, the match reason the suggestion is written from. The summary,
+  category, matches to your other projects, and suggestions follow at once (`alpha add` processes before it
+  returns; the form and the tool start `alpha process` in the background). A URL Alpha already holds, from any
+  source, is not stored twice: that item is rated α and pinned instead. An X post is refused: bookmark it, and the
+  X source reads it fully.
 - **The warehouse** (`var/alpha.db`) holds `items` (id, source, kind, trust, url, author, text, raw source JSON, and
   the processed title, summary, category, duplicate link), `content` (everything an item points at: images and
   their transcriptions, threads, quoted posts, articles, linked pages), `relevance` per project, `candidates`,
@@ -320,7 +331,8 @@ folder:
 
 Then ask any chat "check Alpha for local SEO". Tools: `search`, `get_item`, `project_context`, `list_projects`,
 `skills`, `suggestions` (what to do with items in each project, α first, each with its implementation status and
-branch), and `request` (the only write: it files a discovery request that the next `alpha run` handles).
+branch), `request` (files a discovery request that the next `alpha run` handles), and `add` (stores a page the user
+found as a curated item, rated α, pinned to a project; the two writes).
 
 Answers are short briefs an agent can use correctly, modeled on the Interface Lineage MCP. Each `search` result
 gives the title, source, who vouches for it (saved by you / found by Alpha), date, url, one line on why it matters
@@ -432,6 +444,7 @@ uv run alpha setup | install | uninstall | status
 uv run alpha run                 # sources on their cadence, open requests, then process
 uv run alpha collect [source]    # curated now (x: --limit N, --full-history)
 uv run alpha discover [source]   # discovered now (--max-requests N)
+uv run alpha add <url> [--note "why"] [--project name] [--later]   # a page you found: stored as yours, rated α, processed now
 uv run alpha focus               # rewrite every focus brief now
 uv run alpha process | render | serve [--port 3460]
 uv run alpha mcp                 # MCP server for agents (stdio)
