@@ -2527,7 +2527,7 @@ def implement_readback_page(settings: Settings, item_id: str, project: str, back
                          "precedence over the suggestion.<details><summary>Read them</summary><div class=\"chat\">"
                          + "".join(f'<div class="bubble{" you" if m["role"] == "user" else ""}">{escape(m["content"])}'
                                    "</div>" for m in messages) + "</div></details>"))
-        minutes = implement.TIME_LIMIT_SECONDS // 60
+        minutes = settings.implement_minutes
         if chosen.repository:
             busy = [row for row in connection.execute(
                 "SELECT * FROM suggestions WHERE implement_status IN ('queued', 'implementing')")
@@ -2544,7 +2544,8 @@ def implement_readback_page(settings: Settings, item_id: str, project: str, back
                 ("Then", "Alpha commits the change on the branch itself, as you (your git identity, no trailers): "
                          f"“Alpha: {escape(chosen.headline)}”, with the item's link. The report and the diff wait "
                          "here under Review changes; merging, deleting, and marking it done stay yours."),
-                ("Time", f"usually 5 to 20 minutes, stopped at {minutes}; one implementation runs at a time"
+                ("Time", f"stopped at {minutes} minutes (implement_minutes); a run stopped there keeps what it did, "
+                         "committed as it was, and says so in its report. One implementation runs at a time"
                          + (f" ({len(busy)} running or waiting now, so this one waits its turn)" if busy else "")),
                 ("Guarantees", "<b>Report and change on a new branch only.</b> Nothing is pushed, deployed, published, "
                                "sent, or bought."),

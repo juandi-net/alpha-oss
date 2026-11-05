@@ -9,23 +9,34 @@ import os
 import shutil
 import signal
 import subprocess
+import time
 from pathlib import Path
 
 from .config import TOOL_ROOT
-from .skill_test import OUTPUT_TAIL_CHARACTERS, environment
+from .skill_test import OUTPUT_TAIL_CHARACTERS
 
 SESSIONS = TOOL_ROOT / "var" / "omp-sessions"
 # Where omp lives when it is not on the launchd PATH (install.py adds its folder once `omp` is found).
 KNOWN = (Path.home() / "Library/Application Support/Tern/omp/bin/omp", Path.home() / ".local/bin/omp")
 GRACE_SECONDS = 60  # after omp's own --max-time, before the process group is killed
+LIMIT_SLACK_SECONDS = 5  # a run that ended this close to its limit without a final message was stopped by it
 
 
 class AgentError(RuntimeError):
     pass
 
 
+class TimedOut(AgentError):
+    """The run hit its time limit. `text` is the agent's last message so far ('' when it said nothing yet); the
+    caller decides what to keep of the work it did."""
+
+    def __init__(self, time_limit: int, text: str) -> None:
+        super().__init__(f"The agent did not finish within {time_limit // 60} minutes")
+        self.text = text
+
+
 def binary() -> str:
-    found = shutil.which("omp") or shutil.which("omp", path=environment()["PATH"])
+    found = shutil.which("omp") or shutil.which("omp", path=_environment("omp")["PATH"])
     if found:
         return found
     for path in KNOWN:
@@ -47,12 +58,14 @@ def resolve_model(omp: str, model: str) -> str:
 
 
 def _environment(omp: str) -> dict[str, str]:
-    """skill_test.environment (a clean environment: a nested agent's variables make it hang) without Alpha's
-    Anthropic key and base URL, which omp would take over its own login, plus the folders omp and the user's MCP
-    servers are found in."""
-    env = {key: value for key, value in environment().items() if not key.startswith("ANTHROPIC_")}
-    path = [*env["PATH"].split(":"), str(Path(omp).parent), *os.environ.get("PATH", "").split(":")]
-    return env | {"PATH": ":".join(dict.fromkeys(p for p in path if p))}
+    """A clean environment, as skill_test.environment: variables inherited from an agent session (Alpha may run
+    under one) make a nested agent hang, and Alpha's Anthropic key is left out so omp uses its own login. PATH:
+    the usual folders, omp's own, and the current PATH after them (the user's MCP servers live there)."""
+    keep = ("HOME", "USER", "LANG", "TMPDIR")
+    path = [str(Path.home() / ".local/bin"), "/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin",
+            str(Path(omp).parent), *os.environ.get("PATH", "").split(":")]
+    return {key: os.environ[key] for key in keep if key in os.environ} | {
+        "PATH": ":".join(dict.fromkeys(p for p in path if p))}
 
 
 # A conversation's tools: reading, searching, the web, and (through the `write` omp keeps for xd:// devices and
@@ -76,15 +89,30 @@ def run(prompt: str, *, cwd: Path, model: str, time_limit: int, system: str | No
         command += ["--append-system-prompt", system]
     if resume:
         command += ["--resume", resume]
+    started = time.monotonic()
     process = subprocess.Popen(command, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
                                env=_environment(omp), stdin=subprocess.DEVNULL, start_new_session=True)
     try:
         printed, errors = process.communicate(timeout=time_limit + GRACE_SECONDS)
     except subprocess.TimeoutExpired:
         os.killpg(process.pid, signal.SIGTERM)
-        process.communicate()
-        raise AgentError(f"The agent did not finish within {time_limit // 60} minutes") from None
-    session, text = resume or "", ""
+        printed, errors = process.communicate()
+        raise TimedOut(time_limit, _parse(printed, resume)[0]) from None
+    text, session, aborted = _parse(printed, resume)
+    if process.returncode != 0 or not text:
+        # omp stops the session at --max-time in two shapes: the last message aborted (exit 1), or a tool call
+        # cut off ("Command aborted", exit 0) with no final text. Either way the run reached the limit.
+        if aborted or time.monotonic() - started >= time_limit - LIMIT_SLACK_SECONDS:
+            raise TimedOut(time_limit, text)
+        tail = (errors or printed).strip()[-OUTPUT_TAIL_CHARACTERS:]
+        raise AgentError(f"The agent stopped (exit {process.returncode}): {tail}")
+    return text, session
+
+
+def _parse(printed: str, resume: str | None) -> tuple[str, str, bool]:
+    """(the last assistant text, the session id, whether omp stopped the session at --max-time: the last assistant
+    message's stop reason is aborted) from omp's JSON lines."""
+    session, text, aborted = resume or "", "", False
     for line in printed.splitlines():
         try:
             event = json.loads(line)
@@ -93,9 +121,8 @@ def run(prompt: str, *, cwd: Path, model: str, time_limit: int, system: str | No
         if event.get("type") == "session":
             session = event.get("id") or session
         elif event.get("type") == "message_end" and event["message"].get("role") == "assistant":
-            text = "".join(block.get("text", "") for block in event["message"].get("content", [])
+            message = event["message"]
+            aborted = message.get("stopReason") == "aborted"
+            text = "".join(block.get("text", "") for block in message.get("content", [])
                            if block.get("type") == "text").strip() or text
-    if process.returncode != 0 or not text:
-        tail = (errors or printed).strip()[-OUTPUT_TAIL_CHARACTERS:]
-        raise AgentError(f"The agent stopped (exit {process.returncode}): {tail}")
-    return text, session
+    return text, session, aborted

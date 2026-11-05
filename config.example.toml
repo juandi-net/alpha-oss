@@ -32,6 +32,9 @@ skill_model = "opus"
 # agent_model: the omp agents, the Have an idea chat and Implement. A family name is resolved through
 # `omp-latest-model` when it is installed (omp's own match may pick an older release of the family).
 agent_model = "opus"
+# implement_minutes: how long Implement's agent may work on a suggestion before it is stopped (its unfinished changes
+# stay uncommitted in the worktree). A large change needs well over 30.
+implement_minutes = 120
 # jev-latest follows TypeSafe's releases. When the version behind it changes, the next run scores
 # every item again (projects and skill topics) so old and new scores are never mixed.
 jev_model = "jev-latest"

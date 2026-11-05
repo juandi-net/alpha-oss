@@ -29,7 +29,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from . import focus, omp_agent, own_idea, suggestion_chat, writer
-from .config import TOOL_ROOT, Settings
+from .config import TOOL_ROOT, Settings, load_settings
 from .projects import _local_file, _repository_spec
 from .skills import slug
 from .storage import content_of, now
@@ -37,9 +37,10 @@ from .storage import content_of, now
 WORKTREES = TOOL_ROOT / "var" / "worktrees"
 HANDOFFS = TOOL_ROOT / "var" / "handoffs"
 LOCK = TOOL_ROOT / "var" / "implement.lock"
-TIME_LIMIT_SECONDS = 30 * 60
-# A run still marked implementing (or queued) after this long stopped without saying so; it may start again.
-STALE = {"implementing": timedelta(seconds=TIME_LIMIT_SECONDS) + timedelta(minutes=15), "queued": timedelta(hours=3)}
+# A run still marked implementing past settings.implement_minutes plus this grace stopped without saying so; it may
+# start again. A queued run past QUEUED_STALE did too.
+STALE_GRACE = timedelta(minutes=15)
+QUEUED_STALE = timedelta(hours=3)
 BRANCH_WORDS = 6
 BRANCH_CHARACTERS = 40
 ITEM_CHARACTERS = 20_000
@@ -178,10 +179,13 @@ def first_step(action: str) -> str:
 
 
 def state(suggestion: sqlite3.Row) -> str | None:
-    """The implementation's state; a queued or implementing run past its STALE limit shows as stale."""
+    """The implementation's state; a queued or implementing run past its stale limit (implement_minutes plus
+    STALE_GRACE, or QUEUED_STALE) shows as stale."""
     status = suggestion["implement_status"]
-    if status in STALE and suggestion["implement_started_at"]:
-        if datetime.now(UTC) - datetime.fromisoformat(suggestion["implement_started_at"]) > STALE[status]:
+    if status in ("queued", "implementing") and suggestion["implement_started_at"]:
+        limit = (QUEUED_STALE if status == "queued"
+                 else timedelta(minutes=load_settings().implement_minutes) + STALE_GRACE)
+        if datetime.now(UTC) - datetime.fromisoformat(suggestion["implement_started_at"]) > limit:
             return "stale"
     return status
 
@@ -335,14 +339,20 @@ def diff(suggestion: sqlite3.Row) -> tuple[str, str]:
             _git(folder, "diff", "--find-renames", span, check=False).stdout)
 
 
-def _agent(folder: Path, prompt: str, model: str) -> str:
-    """The agent's report (its final message), from one omp session in the worktree. Stopped at
-    TIME_LIMIT_SECONDS with its whole process group."""
+def _agent(folder: Path, prompt: str, model: str, minutes: int) -> tuple[str, bool]:
+    """(the agent's report, whether it was cut short) from one omp session in the worktree, stopped after
+    `minutes`. A run stopped at the limit keeps what it did: its last message stands in for the report, and the
+    caller commits the worktree as it is."""
     try:
-        report, _ = omp_agent.run(prompt, cwd=folder, model=model, time_limit=TIME_LIMIT_SECONDS)
+        report, _ = omp_agent.run(prompt, cwd=folder, model=model, time_limit=minutes * 60)
+    except omp_agent.TimedOut as stopped:
+        last = stopped.text or "(it had not written anything yet)"
+        return (f"## Stopped at the time limit\nThe agent did not finish within {minutes} minutes (implement_minutes "
+                "in config.toml). What is on the branch is what it had done by then, committed as it was; its tests may "
+                f"not have run, so review with care. Its last message:\n\n{last}"), True
     except omp_agent.AgentError as error:
         raise Failure(f"{error}; unfinished changes are left uncommitted in {folder}.") from None
-    return report
+    return report, False
 
 
 def _commit(folder: Path, base: str, headline: str, item: sqlite3.Row) -> int:
@@ -376,11 +386,15 @@ def run(connection: sqlite3.Connection, settings: Settings, item_id: str, projec
             _set(connection, item_id, project, branch=chosen.branch, base=base, path=str(chosen.worktree))
             print(f"Implement: {project}: {chosen.headline} on {chosen.branch} in {chosen.worktree}", flush=True)
             prompt = AGENT_PROMPT.format(**_context(connection, chosen))
-            report = _agent(chosen.worktree, prompt, settings.agent_model)
+            report, cut_short = _agent(chosen.worktree, prompt, settings.agent_model, settings.implement_minutes)
             _set(connection, item_id, project, report=report)
             files = _commit(chosen.worktree, base, chosen.headline, chosen.item)
+            if cut_short and not files:
+                raise Failure(f"The agent did not finish within {settings.implement_minutes} minutes and had changed "
+                              "nothing yet.")
             _set(connection, item_id, project, status="implemented", files=files, finished_at=now())
-            print(f"Implement: done, {files} file{'' if files == 1 else 's'} changed on {chosen.branch}", flush=True)
+            print(f"Implement: {'stopped at the time limit' if cut_short else 'done'}, {files} file"
+                  f"{'' if files == 1 else 's'} changed on {chosen.branch}", flush=True)
         except Exception as error:  # a crashed run must not stay "implementing"
             reason = str(error) if isinstance(error, Failure) else f"{type(error).__name__}: {error}"
             if not isinstance(error, Failure):

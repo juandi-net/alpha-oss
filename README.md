@@ -266,7 +266,8 @@ Confirm, `alpha implement` (`implement.py`) makes a git worktree of the project'
 `[project_repositories]` folder, or a repository with its name under `[context] projects_directory`) on that branch
 from its current HEAD, in `var/worktrees/<project>-<slug>`, so your own working folder is never touched. A headless
 omp agent (`omp -p`, `omp_agent.py`: your own omp login, every MCP server in `~/.omp/agent/mcp.json`, and your
-skills) carries out the first step there in 30 minutes at most: it is told to read, edit files in the worktree, and
+skills) carries out the first step there, for `implement_minutes` at most (default 120; a run stopped at the limit
+keeps what it did, committed as it was, with its last message as the report): it is told to read, edit files in the worktree, and
 run the project's tests, checks, and dependency installs, and not to commit, push, deploy, send, or buy; the rules,
 the worktree, and the time limit are the guard (omp has no command deny-list). Alpha then commits the change on the branch itself, as
 you (your git identity and hooks, no trailers), "Alpha: <headline>" with the item's link; nothing is pushed,
@@ -376,7 +377,7 @@ subscriptions). Logs carry counts, never text or secrets. The dashboard listens 
   change. `ALPHA_CLAUDE_BASE_URL` can point at a local proxy (such as CLIProxyAPI) that serves a Claude
   subscription instead of the pay-per-token API.
 - omp (your own login, not Alpha's key): each Have an idea turn is one omp session turn with tools (cache-heavy,
-  about $0.10 on the first turn, less after), and Implement is an omp run of up to 30 minutes.
+  about $0.10 on the first turn, less after), and Implement is an omp run of up to `implement_minutes`.
 - Source reads are free: X and GitHub trending through their web pages, Substack, papers, GitHub, and Hugging Face
   through public APIs or your own sign-in.
 
