@@ -31,7 +31,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from . import focus, suggestion_chat, writer
+from . import focus, own_idea, suggestion_chat, writer
 from .config import TOOL_ROOT, Settings
 from .projects import _local_file, _repository_spec
 from .skill_test import OUTPUT_TAIL_CHARACTERS, environment
@@ -247,7 +247,7 @@ def _context(connection: sqlite3.Connection, plan: Plan) -> dict[str, str]:
     item = plan.item
     return {
         "project": project, "branch": plan.branch, "headline": plan.headline, "commands": ", ".join(CHECK_COMMANDS),
-        "questions": questions(connection, plan.item["id"], project), "own": own_idea_of(plan.suggestion),
+        "questions": questions(connection, plan.item["id"], project), "own": own_idea_of(connection, plan.suggestion),
         "outcome": plan.suggestion["outcome"] or "(not written)", "action": plan.suggestion["action"],
         "first_step": first_step(plan.suggestion["action"]),
         "spec": (spec or "(no description)")[:SPEC_CHARACTERS], "brief": brief["brief"] if brief else "(none yet)",
@@ -267,13 +267,17 @@ def questions(connection: sqlite3.Connection, item_id: str, project: str) -> str
             f"{suggestion_chat.transcript(messages)}\n")
 
 
-def own_idea_of(suggestion: sqlite3.Row) -> str:
-    """The user's own words when they wrote the suggestion themselves (own_idea.py), as a section of the agent's
-    prompt; '' for one Alpha wrote."""
+def own_idea_of(connection: sqlite3.Connection, suggestion: sqlite3.Row) -> str:
+    """The user's own words when they wrote the suggestion themselves (own_idea.py), and the chat that shaped it
+    while it is still there, as a section of the agent's prompt; '' for one Alpha wrote."""
     if suggestion["basis_kind"] != "user":
         return ""
-    return ("\n# The user's own idea\nThe user wrote this suggestion themselves; the how above is Alpha's write-up of "
-            f"it. Their words, which take precedence:\n\n{suggestion['basis']}\n")
+    section = ("\n# The user's own idea\nThe user wrote this suggestion themselves; the how above is Alpha's write-up "
+               f"of it. Their words, which take precedence:\n\n{suggestion['basis']}\n")
+    chat = own_idea.get(connection, suggestion["item_id"])
+    if chat and chat["project"] == suggestion["project"] and chat["suggested_at"]:
+        section += f"\nHow the idea was shaped with Alpha:\n\n{own_idea.transcript(own_idea.messages_of(chat))}\n"
+    return section
 
 
 def _set(connection: sqlite3.Connection, item_id: str, project: str, **values) -> None:

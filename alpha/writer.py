@@ -396,14 +396,17 @@ def suggest(model: str, item: sqlite3.Row, project_name: str, project_text: str,
     })
 
 
-OWN_IDEA_SYSTEM = (
+IDEA_CHAT_SYSTEM = (
     "The user collected an item (a post, article, paper, repo, dataset, model, or Space) and has their own idea of what "
-    "to do with it in one of their projects. Write that idea up as a suggestion they will rate and may carry out: the "
-    "headline (the benefit), the outcome, the how, and the effort.\n\n"
+    "to do with it in one of their projects. Shape it with them into a suggestion they can implement: the headline "
+    "(the benefit), the outcome, the how, and the effort.\n\n"
     "The idea is theirs: keep its intent, scope, and the part of the project it names. Do not replace it with another "
-    "application, do not add a second one, and never skip it (skip is always false). Fill in only what it leaves open: "
-    "the specific method or number from the item it relies on, and the first step, from the project's description and "
-    "the item.\n\n"
+    "application or add a second one. Fill in what it leaves open from the project's description and the item: the "
+    "specific method or number from the item it relies on, and the first step. Ask at most three short questions at a "
+    "time, each on its own numbered line, only about what changes the how (where in the project it goes, a choice "
+    "between two ways, a constraint); propose sensible defaults instead of asking about everything. Every answer "
+    "carries your current plan, updated with everything said so far. Set ready when the how is specific enough that an "
+    "agent could start without asking anything else; the user may keep it or implement it earlier.\n\n"
     "How: 1 to 3 sentences in this form: \"In <project>: <do X>, because <Y>; first step: <Z>.\" The first step is "
     "something the user could start today in under an hour. No hedging (no might, consider, explore), no preamble, no "
     "restating the item.\n\n"
@@ -413,21 +416,34 @@ OWN_IDEA_SYSTEM = (
 )
 
 
-def suggest_from_idea(model: str, item: sqlite3.Row, project_name: str, project_text: str, idea: str) -> Suggestion:
-    """The user's own idea for the item in the project, written up as a suggestion (headline, outcome, how, effort)
-    that keeps their intent; never skipped."""
-    content = (
-        f"Project: {project_name}\n\nWhat the project is and what the user is working on:\n{project_text}\n\n---\n\n"
-        f"The user's idea, in their words:\n{idea}\n\n---\n\n"
+class IdeaPlan(BaseModel):
+    reply: str = Field(description="What you say to the user: your understanding of their idea in a sentence or two, then any questions")
+    ready: bool = Field(description="True when the how is specific enough for an agent to start without more questions")
+    headline: str = Field(description=HEADLINE)
+    outcome: str = Field(description=OUTCOME)
+    action: str = Field(description="How: In <project>: do X, because Y; first step: Z. One to three sentences")
+    effort: str = Field(description="small | medium | large")
+
+
+def plan_idea(model: str, item: sqlite3.Row, project_name: str, project_text: str, messages: list[dict]) -> IdeaPlan:
+    """One turn of the idea chat (the user's own idea for the item in the project). messages alternate user and
+    assistant, starting with the user's idea."""
+    system = (
+        f"{IDEA_CHAT_SYSTEM}\n\nProject: {project_name}\n\nWhat the project is and what the user is working on:\n"
+        f"{project_text}\n\n---\n\n"
         f"Item ({item['kind']}): {item['title'] or item['title_source'] or item['url']}\n{item['summary'] or ''}\n\n"
         f"{item_text(item)[:SUMMARY_ITEM_CHARACTERS]}"
     )
-    suggestion = _stream_parsed(model, OWN_IDEA_SYSTEM, content, Suggestion, MAX_TOKENS)
-    effort = suggestion.effort.strip().lower()
-    return suggestion.model_copy(update={
-        "skip": False, "skip_reason": "",
-        "headline": suggestion.headline.strip().rstrip("."), "outcome": suggestion.outcome.strip(),
-        "action": suggestion.action.strip(), "effort": effort if effort in ("small", "medium", "large") else "medium",
+    response = _client().messages.parse(
+        model=resolve_model(model), max_tokens=MAX_TOKENS * 2, system=system, messages=messages, output_format=IdeaPlan,
+    )
+    plan = response.parsed_output
+    if plan is None:
+        raise RuntimeError(f"no plan in the answer (stop reason {response.stop_reason})")
+    effort = plan.effort.strip().lower()
+    return plan.model_copy(update={
+        "headline": plan.headline.strip().rstrip("."), "outcome": plan.outcome.strip(), "action": plan.action.strip(),
+        "effort": effort if effort in ("small", "medium", "large") else "medium",
     })
 
 

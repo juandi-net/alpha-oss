@@ -235,14 +235,17 @@ the outcome to expect, then the item and source it came from; the how and the ju
 item's page. Each project's page lists its suggestions under What to do, headline and outcome first, opening to the
 how and the item: the ones you rated α first, then the unrated; β-rated and done ones each have a filter.
 
-**Your idea.** When you see a use Alpha did not, open the item, pick the project under Your idea (at the foot of
-Fits your projects), and say what you would do with it there. Claude (`claude_model`) writes it up as a suggestion
-that keeps your intent (headline, outcome, how, effort; `own_idea.py`, `writer.suggest_from_idea`), stored rated α
-with your words as its basis and marked Your idea wherever it shows. From there it is a suggestion like any other:
-Ask about this, Implement (the agent is given your words, which take precedence over the write-up), Mark done, and
-agents see it over MCP. It is the strongest signal Alpha has of what you want items for: the next taste profile
-lists your own ideas under their own heading. A project with a live suggestion for the item is not offered (rate or
-ask about that one); one Alpha skipped is replaced.
+**Have an idea.** When you see a use Alpha did not, open the item, and in the Have an idea card (under Make a
+skill) pick the project and say what you would do with it there. Claude (`claude_model`) shapes it with you in a
+chat (`own_idea.py`, `writer.plan_idea`): every answer carries the current plan (headline, outcome, how, effort),
+keeps your intent rather than replacing it, and asks only what would change the how. When the plan is what you
+meant, Make it a suggestion keeps it in the project's What to do for later, or Implement keeps it and opens
+Implement's readback. Either way it is stored rated α with your own messages as its basis and marked Your idea
+wherever it shows; from there it is a suggestion like any other: Ask about this, Implement (the agent is given your
+words and the chat that shaped them, which take precedence over the write-up), Mark done, and agents see it over
+MCP. It is the strongest signal Alpha has of what you want items for: the next taste profile lists your own ideas
+under their own heading. A project with a live suggestion for the item is not offered (rate or ask about that one);
+one Alpha skipped is replaced. Start over clears the chat; the suggestion it made stays.
 
 **Ask about this.** Under each suggestion on an item's page (and in a project's list, once opened), ask questions
 before you implement it, for example "how would this affect X, and how much work is it?". Claude (`claude_model`)

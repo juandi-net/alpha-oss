@@ -141,6 +141,17 @@ CREATE TABLE IF NOT EXISTS skill_chats (
     updated_at TEXT NOT NULL
 );
 
+-- A conversation shaping the user's own idea for an item in a project (the dashboard's Have an idea, own_idea.py),
+-- kept after it became a suggestion so Implement can read how it was shaped; Start over deletes it.
+CREATE TABLE IF NOT EXISTS idea_chats (
+    item_id TEXT PRIMARY KEY REFERENCES items(id),
+    project TEXT NOT NULL,
+    messages TEXT NOT NULL,          -- JSON list of {role, content}; an assistant content is an IdeaPlan as JSON
+    plan TEXT NOT NULL,              -- the latest IdeaPlan as JSON
+    suggested_at TEXT,               -- when the plan became the (item, project) suggestion
+    updated_at TEXT NOT NULL
+);
+
 -- What the user is working on, per active project (focus.py). Every version is kept; the newest is current.
 -- Claude writes them from local activity; a row by the user is their edit, given to the next refresh.
 CREATE TABLE IF NOT EXISTS focus_briefs (

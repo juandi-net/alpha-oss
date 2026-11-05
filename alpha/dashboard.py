@@ -10,9 +10,9 @@ as a banner on every page until it clears.
 Every request reads config.toml and the database again, so a scheduled run or a new threshold shows up on the
 next page load without restarting the server. The pages are server-rendered HTML; alpha/static holds the one
 stylesheet and the small script (live search, more results, waiting buttons, α / β saved in place, the live run
-ledger, keyboard shortcuts, copy buttons, running clocks). An item's page holds the skill chat (skill_chat.py), Your
-idea (own_idea.py: the user's own suggestion for a project, rated α), and each suggestion its Ask about this
-(suggestion_chat.py); all three call Claude while the request waits. Builds,
+ledger, keyboard shortcuts, copy buttons, running clocks). An item's page holds the skill chat (skill_chat.py), Have
+an idea (own_idea.py: a chat shaping the user's own suggestion for a project, kept rated α or sent to Implement),
+and each suggestion its Ask about this (suggestion_chat.py); all three call Claude while the request waits. Builds,
 proposals, publishing, rejecting, and the competing-skills check
 start the `skills` CLI command in the background, and Implement the `implement` command (implement.py). Removing an
 item from a skill, editing a brief, filing a discovery request, and rating an item α or β (taste.py; the next run
@@ -47,7 +47,7 @@ from .skills import (attempts_of, diff, failure, last_failed, last_problems, liv
 from .sources import SOURCES, enabled, last_run, missing, options
 from .sources import x as x_source
 from .storage import KINDS, RESOURCE_KINDS, SKILL_KINDS, connect, file_request, get_metadata, now
-from .writer import REGRESSION_TOLERANCE, SkillPlan
+from .writer import REGRESSION_TOLERANCE, IdeaPlan, SkillPlan
 
 STATIC = Path(__file__).resolve().parent / "static"
 # X post ids are numbers; every other source's ids are <source>-<native id>.
@@ -1289,27 +1289,68 @@ def _skill_section(connection: sqlite3.Connection, settings: Settings, item_id: 
     return "".join(parts)
 
 
-def _own_idea_form(connection: sqlite3.Connection, item_id: str, matched: list[str], suggested: set[str],
-                   error: str) -> str:
-    """Your idea: the user names a project and says what they would do with the item there, and Claude writes it up
-    as an α-rated suggestion while the request waits (own_idea.py). Projects that fit the item come first, then the
-    rest with a spec or a brief; one that already has a live suggestion is not offered (rate or ask about that one)."""
-    known = own_idea.projects(connection)
-    names = [name for name in matched if name not in suggested and name in known]
-    names += [name for name in known if name not in suggested and name not in names]
-    if not names:
-        return ""
-    options = "".join(f'<option value="{escape(name)}">{escape(name)}</option>' for name in names)
-    failed = f'<p class="error">Not written: {escape(error)}</p>' if error else ""
-    return (
-        f'<details class="own-idea" id="own-idea"{" open" if error else ""}><summary>Your idea</summary>'
-        '<p class="note">See a use Alpha did not? Say what you would do with this in a project. It becomes a '
-        "suggestion rated α, in your words, and teaches Alpha what you want items for.</p>"
-        f'{failed}<form class="wait stack" data-wait="Writing…" method="post" action="/item/{quote(item_id)}/idea">'
-        f'<select name="project" aria-label="Project">{options}</select>'
-        '<textarea name="idea" rows="3" required placeholder="What you would do with this there (⌘↩ sends)"></textarea>'
-        '<button class="primary">Make it a suggestion</button></form></details>'
+def _idea_section(connection: sqlite3.Connection, item_id: str, matched: list[str], suggested: set[str],
+                  error: str) -> str:
+    """Have an idea: the user names a project and says what they would do with the item there; Claude shapes it
+    with them (own_idea.py: the conversation, the current plan, and Make it a suggestion or Implement). Projects
+    that fit the item come first, then the rest with a spec or a brief; one that already has a live suggestion is
+    not offered (rate or ask about that one). `error`: why the last message, keep, or implement failed."""
+    action = f"/item/{quote(item_id)}"
+    chat = own_idea.get(connection, item_id)
+    plan = own_idea.plan_of(chat)
+    parts = ["<h4>Have an idea</h4>"]
+    if error:
+        parts.append(f'<p class="error">Something went wrong: {escape(error)}</p>')
+    if chat is None or plan is None:
+        known = own_idea.projects(connection)
+        names = [name for name in matched if name not in suggested and name in known]
+        names += [name for name in known if name not in suggested and name not in names]
+        if not names:
+            parts.append('<p class="note">Every project with a spec or a brief already has a suggestion for this item; '
+                         "rate or ask about those.</p>")
+            return "".join(parts)
+        options = "".join(f'<option value="{escape(name)}">{escape(name)}</option>' for name in names)
+        parts.append(
+            '<p class="note">See a use Alpha did not? Say what you would do with this in a project. Claude shapes it '
+            "with you, then keep it as a suggestion or implement it; either way it is rated α in your words and "
+            "teaches Alpha what you want items for.</p>"
+            f'<form class="wait stack" data-wait="Thinking…" method="post" action="{action}/idea">'
+            f'<select name="project" aria-label="Project">{options}</select>'
+            '<textarea name="message" rows="3" required placeholder="What you would do with this there (⌘↩ sends)">'
+            '</textarea><button class="primary">Have an idea</button></form>'
+        )
+        return "".join(parts)
+    project = chat["project"]
+    bubbles = [
+        f'<div class="bubble you">{escape(m["content"])}</div>' if m["role"] == "user"
+        else f'<div class="bubble">{escape(IdeaPlan.model_validate_json(m["content"]).reply)}</div>'
+        for m in own_idea.messages_of(chat)
+    ]
+    parts.append(f'<p class="note">For <a href="/project/{quote(project)}">{escape(project)}</a></p>'
+                 f'<div class="chat">{"".join(bubbles)}</div>')
+    kept = ""
+    if chat["suggested_at"]:
+        anchor = f'/item/{quote(item_id)}#{_ask_anchor(item_id, project)}'
+        kept = (f'<p class="note">Now a suggestion for {escape(project)} (<a href="{anchor}">under Fits your '
+                f"projects</a>), updated {_ago(chat['suggested_at'])}; keeping it again replaces it with this plan.</p>")
+    parts.append(
+        f'<div class="plan"><div class="meta"><span class="chip {"ready" if plan.ready else ""}">'
+        f'{"ready to implement" if plan.ready else "still shaping"}</span>'
+        f"<span>{escape(plan.effort)} effort</span></div>{kept}"
+        f"<h3>{escape(plan.headline)}</h3><p>{escape(plan.outcome)}</p>"
+        f'<p class="label">How</p>{_text(plan.action)}'
+        f'<div class="actions"><form method="post" action="{action}/idea-keep"><button class="secondary">'
+        "Make it a suggestion</button></form>"
+        f'<form method="post" action="{action}/idea-implement"><button class="primary">Implement…</button></form></div>'
+        '<p class="note">Make it a suggestion keeps it in the project’s What to do for later. Implement keeps it and '
+        "shows what the agent will do before it starts.</p></div>"
+        f'<form class="wait stack" data-wait="Thinking…" method="post" action="{action}/idea">'
+        '<textarea name="message" rows="3" required placeholder="Answer, or change the idea (⌘↩ sends)">'
+        '</textarea><div class="actions"><button class="primary">Send</button></div></form>'
+        f'<form method="post" action="{action}/idea-reset" onsubmit="return confirm(\'Start this idea over?\')">'
+        '<button class="quiet">Start over</button></form>'
     )
+    return "".join(parts)
 
 
 def item_page(settings: Settings, item_id: str, notice: str = "", error: str = "", *, seen: str,
@@ -1370,7 +1411,7 @@ def item_page(settings: Settings, item_id: str, notice: str = "", error: str = "
             for name in suggestions if name not in {m["project"] for m in matches}
         )
         projects = f'<ul class="matches">{projects}</ul>' if projects else '<p class="note">No project fits this one yet.</p>'
-        projects += _own_idea_form(connection, idea, [m["project"] for m in matches], set(suggestions), idea_error)
+        have_idea = _idea_section(connection, idea, [m["project"] for m in matches], set(suggestions), idea_error)
         unrated_idea = row["tier"] == "idea"
         feeds_skills = row["kind"] in SKILL_KINDS and not unrated_idea
         skills_html = (f'<p class="note">{KIND_LABELS.get(row["kind"], row["kind"])} never feed skills; this one shows '
@@ -1406,6 +1447,7 @@ def item_page(settings: Settings, item_id: str, notice: str = "", error: str = "
             skills_html += f'<p class="notice">{escape(notice)}</p>'
         chat = (f'<section class="panel" id="skill">{_skill_section(connection, settings, item_id, error)}</section>'
                 if feeds_skills else "")
+        chat += f'<section class="panel" id="own-idea">{have_idea}</section>'
         title = _title(row)
         original_title = (f'<p class="source-title">{escape(row["title_source"])}</p>'
                           if row["title_source"] and row["title_source"] != row["title"] else "")
@@ -2767,13 +2809,21 @@ class _Handler(BaseHTTPRequestHandler):
                 location = "/skills?started=build"
             elif action == "add" and skill_chat.add_to_topic(connection, item_id, field("topic")):
                 location += "?added=1"
-            elif action == "idea":
+            elif action in ("idea", "idea-keep", "idea-implement", "idea-reset"):
                 try:
-                    own_idea.add(connection, settings, item_id, field("project"), field("idea"))
-                except Exception as error:  # shown under Your idea; it can be sent again (a refusal in plain words)
+                    if action == "idea":
+                        own_idea.send(connection, settings, item_id, field("project"), field("message"))
+                    elif action == "idea-reset":
+                        own_idea.reset(connection, item_id)
+                    else:
+                        project = own_idea.keep(connection, settings, item_id)
+                        if action == "idea-implement":  # the readback; nothing starts before its Confirm
+                            location = f"{base}/suggestion/{quote(project, safe='')}/implement"
+                except Exception as error:  # shown under Have an idea; it can be sent again (a refusal in plain words)
                     why = str(error) if isinstance(error, ValueError) else f"{type(error).__name__}: {error}"
                     location = f"{base}?{urlencode({'idea_error': why[:300]})}"
-                location += "#own-idea"
+                if not location.endswith("/implement"):
+                    location += "#own-idea"
             else:
                 self._send(404, NOT_FOUND)
                 return
