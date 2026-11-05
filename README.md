@@ -236,7 +236,7 @@ item's page. Each project's page lists its suggestions under What to do, headlin
 how and the item: the ones you rated α first, then the unrated; β-rated and done ones each have a filter.
 
 **Have an idea.** When you see a use Alpha did not, open the item, and in the Have an idea card (under Make a
-skill) pick the project and say what you would do with it there, as rough as it comes. An omp agent (`claude_model`,
+skill) pick the project and say what you would do with it there, as rough as it comes. An omp agent (`agent_model`,
 one omp session per chat with your MCP servers and skills, so it can search Alpha, read the project's repository,
 or ask Interface Lineage mid-conversation; `own_idea.py`, `omp_agent.py`) shapes it with you: every answer carries
 the current plan (the idea
@@ -260,7 +260,8 @@ your decisions and constraints in it take precedence over the suggestion. Agents
 `suggestions`: the number of questions and the last answer).
 
 **Implement.** Implement on a suggestion first reads back what it will do: the suggestion and its item, the
-repository folder, the new branch `alpha/<slug>`, the model (`claude_model`), the time, and the guarantees. On
+repository folder, the new branch `alpha/<slug>`, the model (`agent_model`; a family name such as `opus` is
+resolved to its newest release through `omp-latest-model` when that helper is installed), the time, and the guarantees. On
 Confirm, `alpha implement` (`implement.py`) makes a git worktree of the project's local repository (its
 `[project_repositories]` folder, or a repository with its name under `[context] projects_directory`) on that branch
 from its current HEAD, in `var/worktrees/<project>-<slug>`, so your own working folder is never touched. A headless

@@ -2,7 +2,7 @@
 
 Alpha writes suggestions (what to do with an item in a project) only for the pairs its matching and judging reach.
 When the user sees a use the system did not, they name the project and write the idea in their words, often rough;
-Claude (`claude_model`) shapes it with them in a chat (writer.plan_idea): every answer carries the current plan
+an omp agent (`agent_model`, omp_agent.py) shapes it with them in a chat: every answer carries the current plan
 (the core in a sentence, headline, outcome, how, effort, and up to three sharpenings to take or leave) and asks
 what would change the how. When they are happy, Make it a suggestion stores the plan
 as the (item, project) suggestion, or Implement stores it and opens Implement's readback. Either way it is stored
@@ -92,7 +92,7 @@ def send(connection: sqlite3.Connection, settings: Settings, item_id: str, proje
                   f"Your current plan:\n{chat['plan']}\n\nNow the user says: {text}")
     from .implement import repository  # here: implement.py reads this module's chats for its agent
     answer, session = omp_agent.run(
-        prompt, cwd=repository(settings, project) or TOOL_ROOT, model=settings.claude_model,
+        prompt, cwd=repository(settings, project) or TOOL_ROOT, model=settings.agent_model,
         time_limit=TURN_SECONDS, system=writer.idea_system(item, project, project_text), resume=session, read_only=True,
     )
     plan = writer.parse_idea_plan(answer)
@@ -128,7 +128,7 @@ def keep(connection: sqlite3.Connection, settings: Settings, item_id: str) -> st
         "model = excluded.model, status = excluded.status, created_at = excluded.created_at, rating = excluded.rating, "
         "reason = NULL, rated_at = excluded.rated_at",
         (item_id, project, plan.action, plan.headline, plan.outcome, plan.effort, own_words(messages_of(chat)),
-         BASIS_KIND, settings.claude_model, written, written),
+         BASIS_KIND, settings.agent_model, written, written),
     )
     connection.execute("UPDATE idea_chats SET suggested_at = ? WHERE item_id = ?", (written, item_id))
     set_metadata(connection, RATED_AT, written)

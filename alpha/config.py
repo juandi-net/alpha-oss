@@ -54,6 +54,7 @@ class Settings:
     claude_model: str
     summary_model: str
     skill_model: str
+    agent_model: str
     jev_model: str
     relevance_threshold: float
     relevance_guidance: str
@@ -96,6 +97,7 @@ def load_settings(config_path: Path = CONFIG_PATH) -> Settings:
         claude_model=raw.get("claude_model", "sonnet"),
         summary_model=raw.get("summary_model", "opus"),
         skill_model=raw.get("skill_model", "opus"),
+        agent_model=raw.get("agent_model", "opus"),
         jev_model=raw.get("jev_model", "jev-latest"),
         relevance_threshold=float(raw.get("relevance_threshold", 1.5)),
         relevance_guidance=raw.get("relevance_guidance", "").strip(),

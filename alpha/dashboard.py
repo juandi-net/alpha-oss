@@ -2537,9 +2537,10 @@ def implement_readback_page(settings: Settings, item_id: str, project: str, back
                              f"<code>{escape(chosen.head)}</code> (uncommitted changes there are not included)"),
                 ("New branch", f"<code>{escape(chosen.branch)}</code>, checked out in its own worktree "
                                f"<code>{escape(str(chosen.worktree))}</code>, so your working folder is never touched"),
-                ("Agent", f"Claude Code, headless, with <code>{escape(settings.claude_model)}</code> (claude_model): it "
-                          "reads the project, edits files in the worktree, and runs the project's tests, checks, and "
-                          "read-only commands; no MCP servers, no git commit or push, no deploy"),
+                ("Agent", f"omp, headless, with <code>{escape(settings.agent_model)}</code> (agent_model; a family name "
+                          "means its newest model), your MCP servers and skills: it reads the project, edits files in "
+                          "the worktree, and runs the project's tests and checks; told not to commit, push, deploy, "
+                          "send, or buy"),
                 ("Then", "Alpha commits the change on the branch itself, as you (your git identity, no trailers): "
                          f"“Alpha: {escape(chosen.headline)}”, with the item's link. The report and the diff wait "
                          "here under Review changes; merging, deleting, and marking it done stay yours."),

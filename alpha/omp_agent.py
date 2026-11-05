@@ -34,6 +34,18 @@ def binary() -> str:
     raise AgentError("omp is not installed (https://omp.sh), so no agent can run")
 
 
+def resolve_model(omp: str, model: str) -> str:
+    """A family name (opus, sonnet, haiku) is the newest model of that family: `omp-latest-model <family>` says
+    which (omp's own fuzzy match can pick an older release). Without that tool, or for a full id, `model` as given."""
+    if any(character.isdigit() for character in model) or "/" in model:
+        return model
+    tool = shutil.which("omp-latest-model", path=_environment(omp)["PATH"])
+    if not tool:
+        return model
+    found = subprocess.run([tool, model], capture_output=True, text=True, env=_environment(omp))
+    return found.stdout.strip() if found.returncode == 0 and found.stdout.strip() else model
+
+
 def _environment(omp: str) -> dict[str, str]:
     """skill_test.environment (a clean environment: a nested agent's variables make it hang) without Alpha's
     Anthropic key and base URL, which omp would take over its own login, plus the folders omp and the user's MCP
@@ -56,8 +68,8 @@ def run(prompt: str, *, cwd: Path, model: str, time_limit: int, system: str | No
     `time_limit` seconds (omp's --max-time; the process group is killed GRACE_SECONDS later)."""
     omp = binary()
     SESSIONS.mkdir(parents=True, exist_ok=True)
-    command = [omp, "-p", prompt, "--mode", "json", "--model", model, "--cwd", str(cwd), "--session-dir",
-               str(SESSIONS), "--approval-mode", "yolo", "--max-time", str(time_limit)]
+    command = [omp, "-p", prompt, "--mode", "json", "--model", resolve_model(omp, model), "--cwd", str(cwd),
+               "--session-dir", str(SESSIONS), "--approval-mode", "yolo", "--max-time", str(time_limit)]
     if read_only:
         command += ["--tools", READ_ONLY_TOOLS]
     if system:

@@ -3,7 +3,7 @@ on a new branch in a separate worktree, and reports; Alpha then commits the chan
 
 The user's working folder is never touched: the branch alpha/<slug> starts from the repository's current HEAD
 (uncommitted changes there are not included) in var/worktrees/<project>-<slug>. The agent is an omp session with
-`claude_model`, so it has the user's MCP servers (Alpha's own search, Interface Lineage, browsers, ...) and skills;
+`agent_model`, so it has the user's MCP servers (Alpha's own search, Interface Lineage, browsers, ...) and skills;
 it is told to read, edit files in the worktree, and run the project's tests, checks, and dependency installs, and
 not to commit, push, deploy, send, or buy (omp has no hard deny-list for commands: the rules, the worktree, and the
 time limit are the guard). Alpha commits as the user (their git identity and hooks, no trailers) with
@@ -376,7 +376,7 @@ def run(connection: sqlite3.Connection, settings: Settings, item_id: str, projec
             _set(connection, item_id, project, branch=chosen.branch, base=base, path=str(chosen.worktree))
             print(f"Implement: {project}: {chosen.headline} on {chosen.branch} in {chosen.worktree}", flush=True)
             prompt = AGENT_PROMPT.format(**_context(connection, chosen))
-            report = _agent(chosen.worktree, prompt, settings.claude_model)
+            report = _agent(chosen.worktree, prompt, settings.agent_model)
             _set(connection, item_id, project, report=report)
             files = _commit(chosen.worktree, base, chosen.headline, chosen.item)
             _set(connection, item_id, project, status="implemented", files=files, finished_at=now())

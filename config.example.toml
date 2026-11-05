@@ -29,6 +29,9 @@ claude_model = "sonnet"
 summary_model = "opus"
 # skill_model: proposing topics, writing skill specs, and grading test runs.
 skill_model = "opus"
+# agent_model: the omp agents, the Have an idea chat and Implement. A family name is resolved through
+# `omp-latest-model` when it is installed (omp's own match may pick an older release of the family).
+agent_model = "opus"
 # jev-latest follows TypeSafe's releases. When the version behind it changes, the next run scores
 # every item again (projects and skill topics) so old and new scores are never mixed.
 jev_model = "jev-latest"
