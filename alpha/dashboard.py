@@ -1333,19 +1333,23 @@ def _idea_section(connection: sqlite3.Connection, item_id: str, matched: list[st
         anchor = f'/item/{quote(item_id)}#{_ask_anchor(item_id, project)}'
         kept = (f'<p class="note">Now a suggestion for {escape(project)} (<a href="{anchor}">under Fits your '
                 f"projects</a>), updated {_ago(chat['suggested_at'])}; keeping it again replaces it with this plan.</p>")
+    polish = (f'<p class="label">To make more of it</p><ul class="plain">'
+              + "".join(f"<li>{escape(line)}</li>" for line in plan.polish) + "</ul>"
+              '<p class="note">Take one by saying so below; it folds into the plan.</p>') if plan.polish else ""
     parts.append(
         f'<div class="plan"><div class="meta"><span class="chip {"ready" if plan.ready else ""}">'
         f'{"ready to implement" if plan.ready else "still shaping"}</span>'
         f"<span>{escape(plan.effort)} effort</span></div>{kept}"
         f"<h3>{escape(plan.headline)}</h3><p>{escape(plan.outcome)}</p>"
-        f'<p class="label">How</p>{_text(plan.action)}'
+        f'<p class="label">The core</p><p>{escape(plan.core)}</p>'
+        f'<p class="label">How</p>{_text(plan.action)}{polish}'
         f'<div class="actions"><form method="post" action="{action}/idea-keep"><button class="secondary">'
         "Make it a suggestion</button></form>"
         f'<form method="post" action="{action}/idea-implement"><button class="primary">Implement…</button></form></div>'
         '<p class="note">Make it a suggestion keeps it in the project’s What to do for later. Implement keeps it and '
         "shows what the agent will do before it starts.</p></div>"
         f'<form class="wait stack" data-wait="Thinking…" method="post" action="{action}/idea">'
-        '<textarea name="message" rows="3" required placeholder="Answer, or change the idea (⌘↩ sends)">'
+        '<textarea name="message" rows="3" required placeholder="Take a sharpening, answer, or change the idea (⌘↩ sends)">'
         '</textarea><div class="actions"><button class="primary">Send</button></div></form>'
         f'<form method="post" action="{action}/idea-reset" onsubmit="return confirm(\'Start this idea over?\')">'
         '<button class="quiet">Start over</button></form>'

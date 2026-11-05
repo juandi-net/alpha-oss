@@ -400,13 +400,21 @@ IDEA_CHAT_SYSTEM = (
     "The user collected an item (a post, article, paper, repo, dataset, model, or Space) and has their own idea of what "
     "to do with it in one of their projects. Shape it with them into a suggestion they can implement: the headline "
     "(the benefit), the outcome, the how, and the effort.\n\n"
-    "The idea is theirs: keep its intent, scope, and the part of the project it names. Do not replace it with another "
-    "application or add a second one. Fill in what it leaves open from the project's description and the item: the "
-    "specific method or number from the item it relies on, and the first step. Ask at most three short questions at a "
-    "time, each on its own numbered line, only about what changes the how (where in the project it goes, a choice "
-    "between two ways, a constraint); propose sensible defaults instead of asking about everything. Every answer "
-    "carries your current plan, updated with everything said so far. Set ready when the how is specific enough that an "
-    "agent could start without asking anything else; the user may keep it or implement it earlier.\n\n"
+    "The idea is theirs: keep its intent and the part of the project it names, and do not replace it with another "
+    "application. But work it, do not just transcribe it. The user often spills the idea out rough and then wants to "
+    "iterate until it is sharp. Each turn: distill it to its core (the one thing it does and why that matters for "
+    "the project, in a sentence); make the most of it (what in the item or the project makes it stronger, what to "
+    "cut, where the scope is too wide or too narrow, a first step that proves it fastest); and tell them plainly "
+    "where it is weak or what it rests on. Put the sharpenings in polish: at most three, each one concrete line "
+    "they can take or leave. When they take one, fold it into the plan; when they decline, drop it. Fill in what "
+    "the idea leaves open from the project's description and the item: the specific method or number it relies on, "
+    "and the first step. Ask at most three short questions at a time, each on its own numbered line, only about what "
+    "changes the how (where in the project it goes, a choice between two ways, a constraint); propose sensible "
+    "defaults instead of asking about everything. Every answer carries your current plan, updated with everything "
+    "said so far. Set ready when the how is specific enough that an agent could start without asking anything "
+    "else; the user may keep it or implement it earlier.\n\n"
+    "Reply: your reading of the idea in a sentence or two, then the sharpenings you suggest and why (short), then "
+    "any questions. Plain US English, no Markdown.\n\n"
     "How: 1 to 3 sentences in this form: \"In <project>: <do X>, because <Y>; first step: <Z>.\" The first step is "
     "something the user could start today in under an hour. No hedging (no might, consider, explore), no preamble, no "
     "restating the item.\n\n"
@@ -417,8 +425,12 @@ IDEA_CHAT_SYSTEM = (
 
 
 class IdeaPlan(BaseModel):
-    reply: str = Field(description="What you say to the user: your understanding of their idea in a sentence or two, then any questions")
+    reply: str = Field(description="What you say to the user: your reading of the idea, the sharpenings and why, then any questions")
     ready: bool = Field(description="True when the how is specific enough for an agent to start without more questions")
+    core: str = Field(description="The idea distilled: the one thing it does and why that matters for the project, one sentence")
+    polish: list[str] = Field(description="Up to three concrete ways to make more of the idea (a cut, a sharper scope, a "
+                                          "stronger first step, something in the item they missed), one line each; "
+                                          "empty once nothing is left to sharpen")
     headline: str = Field(description=HEADLINE)
     outcome: str = Field(description=OUTCOME)
     action: str = Field(description="How: In <project>: do X, because Y; first step: Z. One to three sentences")

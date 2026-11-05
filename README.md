@@ -236,9 +236,11 @@ item's page. Each project's page lists its suggestions under What to do, headlin
 how and the item: the ones you rated α first, then the unrated; β-rated and done ones each have a filter.
 
 **Have an idea.** When you see a use Alpha did not, open the item, and in the Have an idea card (under Make a
-skill) pick the project and say what you would do with it there. Claude (`claude_model`) shapes it with you in a
-chat (`own_idea.py`, `writer.plan_idea`): every answer carries the current plan (headline, outcome, how, effort),
-keeps your intent rather than replacing it, and asks only what would change the how. When the plan is what you
+skill) pick the project and say what you would do with it there, as rough as it comes. Claude (`claude_model`)
+shapes it with you in a chat (`own_idea.py`, `writer.plan_idea`): every answer carries the current plan (the idea
+distilled to its core, headline, outcome, how, effort) and up to three sharpenings to take or leave (a cut, a
+tighter scope, a stronger first step, something in the item you missed), says where it is weak, keeps your intent
+rather than replacing it, and asks only what would change the how. When the plan is what you
 meant, Make it a suggestion keeps it in the project's What to do for later, or Implement keeps it and opens
 Implement's readback. Either way it is stored rated α with your own messages as its basis and marked Your idea
 wherever it shows; from there it is a suggestion like any other: Ask about this, Implement (the agent is given your

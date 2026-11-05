@@ -1,9 +1,10 @@
 """The user's own idea for an item: the dashboard's Have an idea card on an item's page.
 
 Alpha writes suggestions (what to do with an item in a project) only for the pairs its matching and judging reach.
-When the user sees a use the system did not, they name the project and write the idea in their words; Claude
-(`claude_model`) shapes it with them in a chat (writer.plan_idea): every answer carries the current plan (headline,
-outcome, how, effort) and asks what would change the how. When they are happy, Make it a suggestion stores the plan
+When the user sees a use the system did not, they name the project and write the idea in their words, often rough;
+Claude (`claude_model`) shapes it with them in a chat (writer.plan_idea): every answer carries the current plan
+(the core in a sentence, headline, outcome, how, effort, and up to three sharpenings to take or leave) and asks
+what would change the how. When they are happy, Make it a suggestion stores the plan
 as the (item, project) suggestion, or Implement stores it and opens Implement's readback. Either way it is stored
 rated α with basis_kind 'user' and the user's own messages as its basis, and from there it is a suggestion like any
 other: Ask about this, Implement, Mark done, and agents read it over MCP. It is the strongest signal of the
