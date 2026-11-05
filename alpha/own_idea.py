@@ -19,7 +19,7 @@ import sqlite3
 
 from . import omp_agent, writer
 from .config import TOOL_ROOT, Settings
-from .pipeline import project_texts
+from .pipeline import project_loop, project_texts
 from .storage import now, set_metadata
 from .taste import RATED_AT
 
@@ -84,7 +84,8 @@ def send(connection: sqlite3.Connection, settings: Settings, item_id: str, proje
     if item is None:
         raise ValueError(f"no item {item_id}")
     messages.append({"role": "user", "content": text})
-    project_text = project_texts(connection).get(project, "(no description)")[:PROJECT_CHARACTERS]
+    project_text = (project_texts(connection).get(project, "(no description)")[:PROJECT_CHARACTERS]
+                    + project_loop(connection).get(project, ""))
     session = chat["session"] if chat else None
     prompt = text
     if chat and not session:  # a chat from before turns ran as omp sessions: its history opens the session

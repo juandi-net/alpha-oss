@@ -39,7 +39,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, parse_qsl, quote, unquote, urlencode, urlparse
 
-from . import focus, implement, own_idea, skill_chat, suggestion_chat, taste
+from . import focus, implement, letthere, own_idea, skill_chat, suggestion_chat, taste
 from .config import TOOL_ROOT, Settings, load_settings
 from .install import RUN_INTERVAL_SECONDS
 from .render import duplicates_by_original
@@ -79,7 +79,7 @@ SOURCE_LABELS = {"x": "X bookmarks", "x_timeline": "X timeline", "substack": "Su
                  "huggingface": "Hugging Face datasets", "hf_likes": "Hugging Face likes",
                  "hf_following": "Hugging Face follows", "papers": "Papers", "arxiv": "arXiv",
                  "github_trending": "GitHub trending", "hf_trending": "Hugging Face trending",
-                 "substack_following": "Substack subscriptions"}
+                 "substack_following": "Substack subscriptions", "letthere": "Let There notes"}
 X_SOURCES = ("x", "x_timeline")
 # Where on X a timeline find came from (candidates.query of an x_timeline candidate).
 TIMELINE_TABS = {"following": "from your Following", "for_you": "from For You"}
@@ -347,7 +347,7 @@ def _layout(connection: sqlite3.Connection, settings: Settings, view: str, title
     )
     keys = "".join(f"<dt><kbd>{escape(key)}</kbd></dt><dd>{escape(what)}</dd>" for key, what in KEYS)
     go = escape(json.dumps({key: href for key, href, _ in GO_KEYS}))
-    # Let There (letthere/): point at something on the Feed, press \, say what should change.
+    # Let There (its own tool): point at something on the Feed, press ], say what should change.
     let_there = (f'\n<script src="{escape(settings.let_there_url)}/overlay.js" data-app="alpha" defer></script>'
                  if settings.let_there_url and view == "feed" else "")
     return f"""<!DOCTYPE html>
@@ -626,7 +626,9 @@ def _suggestion(item_id: str, suggestion: sqlite3.Row | None, item: sqlite3.Row 
     project = suggestion["project"]
     base = f"/item/{quote(item_id)}/suggestion/{quote(project, safe='')}"
     done = suggestion["status"] == "done"
-    yours = '<span class="chip yours" title="You wrote this one">Your idea</span>' if suggestion["basis_kind"] == "user" else ""
+    yours = {"user": '<span class="chip yours" title="You wrote this one">Your idea</span>',
+             "note": '<span class="chip yours" title="You said this on the app itself">Let There</span>'
+             }.get(suggestion["basis_kind"], "")
     if suggestion["headline"]:
         headline = f'<span class="headline">{yours}{escape(suggestion["headline"])}</span>'
         outcome = f'<span class="outcome">{escape(suggestion["outcome"])}</span>' if suggestion["outcome"] else ""
@@ -636,7 +638,7 @@ def _suggestion(item_id: str, suggestion: sqlite3.Row | None, item: sqlite3.Row 
     else:  # written before headlines, until the next run gives it one
         headline, outcome, how = f'<span class="headline">{yours}{escape(suggestion["action"])}</span>', "", ""
     if yours:
-        how += f'<p class="action"><span class="label">You wrote</span>{escape(suggestion["basis"])}</p>'
+        how += f'<p class="action"><span class="label">You {"said" if suggestion["basis_kind"] == "note" else "wrote"}</span>{escape(suggestion["basis"])}</p>'
     ask = _ask(item_id, project, chat or [], error)
     if item is not None:
         idea = '<span class="chip idea">Idea</span>' if item["tier"] == "idea" else ""
@@ -820,6 +822,9 @@ def _where(settings: Settings, filters: dict[str, str], skip: str = "") -> tuple
         if name != skip and filters[name]:
             clauses.append(f"i.{name} = ?")
             parameters.append(filters[name])
+    if skip != "source" and filters["source"] != letthere.SOURCE:  # notes made on an app are not alpha; the Ideas tab has them
+        clauses.append("i.source != ?")
+        parameters.append(letthere.SOURCE)
     if skip != "project" and filters["project"]:
         clauses.append("i.id IN (SELECT item_id FROM relevance WHERE project = ? AND score >= ?)")
         parameters += [filters["project"], settings.relevance_threshold]
@@ -3046,6 +3051,24 @@ class _Handler(BaseHTTPRequestHandler):
             connection.close()
         self._send(303, location=f"{back.path}{'?' + urlencode(kept) if kept else ''}#{anchor}")
 
+    def _letthere_action(self, body: bytes) -> None:
+        """A note Let There just saved (its --notify): file it as a kept idea for its app's project and start
+        Implement (letthere.py), then take any other note still new. Answers JSON; nothing waits on the agent."""
+        settings = load_settings()
+        try:
+            note = json.loads(body) if body else {}
+        except ValueError:
+            self._send(400, b'{"error": "a note is JSON"}', content_type="application/json")
+            return
+        connection = connect(settings.database_path)
+        try:
+            taken = letthere.handle(connection, settings, note) if isinstance(note, dict) else None
+            letthere.sync(connection, settings)
+        finally:
+            connection.close()
+        answer = {"taken": bool(taken), "item": taken[0] if taken else None, "project": taken[1] if taken else None}
+        self._send(200, json.dumps(answer).encode(), content_type="application/json")
+
     def _suggestion_action(self, item_id: str, project: str, action: str, form: dict[str, list[str]]) -> None:
         """α / β on a suggestion (rate, reason: as for an item), or Mark done / Reopen (done, reopen)."""
         field = "rating" if action == "rate" else "reason"
@@ -3053,7 +3076,8 @@ class _Handler(BaseHTTPRequestHandler):
         if action in ("rate", "reason") and value not in ("", *(taste.RATINGS if action == "rate" else taste.REASONS)):
             self._send(400, b"<h1>Unknown rating</h1>")
             return
-        connection = connect(load_settings().database_path)
+        settings = load_settings()
+        connection = connect(settings.database_path)
         try:
             if not connection.execute("SELECT 1 FROM suggestions WHERE item_id = ? AND project = ?",
                                       (item_id, project)).fetchone():
@@ -3067,6 +3091,8 @@ class _Handler(BaseHTTPRequestHandler):
                 connection.execute("UPDATE suggestions SET status = ? WHERE item_id = ? AND project = ?",
                                     ("done" if action == "done" else "open", item_id, project))
                 connection.commit()
+                if action == "done":
+                    letthere.set_status(settings, item_id, "done")
             saved = connection.execute("SELECT rating, reason FROM suggestions WHERE item_id = ? AND project = ?",
                                        (item_id, project)).fetchone()
         finally:
@@ -3084,8 +3110,12 @@ class _Handler(BaseHTTPRequestHandler):
             self._send(403, b"<h1>Forbidden</h1>")
             return
         length = int(self.headers.get("Content-Length") or 0)
-        form = parse_qs(self.rfile.read(length).decode()) if length else {}
+        body = self.rfile.read(length) if length else b""
         parts = urlparse(self.path).path.strip("/").split("/")
+        if parts == ["letthere"]:  # Let There's --notify: a note was just saved (JSON, no browser Origin)
+            self._letthere_action(body)
+            return
+        form = parse_qs(body.decode()) if body else {}
         if (len(parts) == 5 and parts[0] == "item" and parts[2] == "suggestion" and ITEM_ID.fullmatch(unquote(parts[1]))
                 and parts[4] in ("ask", "ask-reset")):
             self._ask_action(unquote(parts[1]), unquote(parts[3]), parts[4], form)

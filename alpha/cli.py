@@ -6,7 +6,7 @@ import os
 from datetime import UTC, datetime
 from types import ModuleType
 
-from . import enrich, focus, implement, judge, pipeline, skills
+from . import enrich, focus, implement, judge, letthere, pipeline, skills
 from .backup import backup
 from .config import TOOL_ROOT, Settings, load_settings, missing_secrets, require_secrets
 from .install import install, setup, uninstall
@@ -128,6 +128,7 @@ def _process(settings: Settings, connection) -> None:
     jev = Jev(settings.jev_model)
     pipeline.sync_jev_version(connection, jev)
     synchronize_projects(connection, settings)
+    letthere.sync(connection, settings)  # notes made on an app while the dashboard was down
     enrich.fetch_links(connection)
     enrich.transcribe_images(connection, settings)
     pipeline.summarize_pending(connection, settings)

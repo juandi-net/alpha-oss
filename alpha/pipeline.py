@@ -151,6 +151,36 @@ def project_texts(connection: sqlite3.Connection) -> dict[str, str]:
     return texts
 
 
+LOOP_PER_PROJECT = 8
+
+
+def project_loop(connection: sqlite3.Connection) -> dict[str, str]:
+    """What the user already asked for and built in each project, for writing a suggestion that adds to it rather
+    than repeating it: their own ideas and notes, and the suggestions implemented, handed off, or done (headline and
+    the first line of the agent's report), newest first, LOOP_PER_PROJECT each."""
+    rows = connection.execute(
+        "SELECT project, headline, action, basis, basis_kind, status, implement_status, "
+        "substr(implement_report, 1, 300) AS report FROM suggestions WHERE basis_kind IN ('user', 'note') "
+        "OR implement_status IN ('implemented', 'handoff') OR status = 'done' "
+        "ORDER BY COALESCE(implement_finished_at, rated_at, created_at) DESC"
+    ).fetchall()
+    lines: dict[str, list[str]] = {}
+    for row in rows:
+        if len(lines.setdefault(row["project"], [])) >= LOOP_PER_PROJECT:
+            continue
+        what = row["headline"] or row["action"]
+        if row["basis_kind"] in ("user", "note"):
+            line = f"- The user asked for: {what} (their words: {' '.join(row['basis'].split())[:200]})"
+        else:
+            line = f"- {what}"
+        if row["implement_status"] in ("implemented", "handoff") or row["status"] == "done":
+            state = "done" if row["status"] == "done" else "built, awaiting review" if row["implement_status"] == "implemented" else "handed off as a task"
+            line += f" [{state}]" + (f": {' '.join(row['report'].split())[:200]}" if row["report"] else "")
+        lines[row["project"]].append(line)
+    return {project: "\n\nAlready asked for or built in this project (add to it, do not repeat it):\n" + "\n".join(entries)
+            for project, entries in lines.items()}
+
+
 def suggest_pending(connection: sqlite3.Connection, settings: Settings) -> None:
     """One suggestion (a concrete action, writer.suggest) per item and project without one: every match above the
     threshold that has its reason, and each find or idea for the project it was found for (from the judge's why).
@@ -177,6 +207,7 @@ def suggest_pending(connection: sqlite3.Connection, settings: Settings) -> None:
     if not pairs:
         return
     texts = project_texts(connection)
+    loop = project_loop(connection)
     work = []
     for pair in pairs:
         basis = "\n".join(filter(None, (f"The match reason: {pair['reason']}" if pair["reason"] else "",
@@ -184,7 +215,8 @@ def suggest_pending(connection: sqlite3.Connection, settings: Settings) -> None:
                                         if pair["why"] else "")))
         kind = "both" if pair["reason"] and pair["why"] else "match" if pair["reason"] else "judge"
         item = connection.execute("SELECT * FROM items WHERE id = ?", (pair["item_id"],)).fetchone()
-        work.append((item, pair["project"], texts.get(pair["project"], "(no description)")[:4000], basis, kind))
+        text = texts.get(pair["project"], "(no description)")[:4000] + loop.get(pair["project"], "")
+        work.append((item, pair["project"], text, basis, kind))
 
     def task(entry: tuple) -> writer.Suggestion:
         item, project, text, basis, _ = entry

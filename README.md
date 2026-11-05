@@ -54,7 +54,8 @@ sources ──> (discovered only: judge) ──> warehouse (SQLite) ──> outp
   an idea α and it becomes a find; until then it feeds no skill.
 - **Taste**: Claude writes a short profile of what you keep and what you would call slop from everything you picked
   (X bookmarks, GitHub stars, Hugging Face likes, sampled so each source is represented), your α / β ratings on
-  items and suggestions, and the ideas you wrote yourself (weighed most), and rewrites it weekly or on the next run
+  items and suggestions, the ideas you wrote yourself or said while pointing at your own app, and what was then
+  built from suggestions in your projects (the last two weighed most), and rewrites it weekly or on the next run
   after a rating changes (`taste.py`). Your
   timelines, your Substack subscriptions, your Hugging Face follows, and the trending feeds are judged against it,
   with the three most similar picked items as examples and up to three similar β items as counter-examples, so a
@@ -64,14 +65,18 @@ sources ──> (discovered only: judge) ──> warehouse (SQLite) ──> outp
   project in 6 to 12 plain words, no model names or jargon), the outcome to expect (one plain sentence), how
   ("In <project>: do X, because Y; first step: Z"), and the effort (small, medium, large). It looks for the lightest
   action that captures the benefit: take the idea, not necessarily the artifact, using what the project already
-  has (its stack and hosted models such as Claude). Heavy adoption (a local model, training, GPUs, large datasets,
+  has (its stack and hosted models such as Claude), and it is shown what you already asked for and built there
+  (`pipeline.project_loop`: your ideas and notes, and the implemented, handed-off, or done suggestions with the
+  agent's report), so it adds to that rather than repeating it; the Have an idea chat sees the same. Heavy adoption (a local model, training, GPUs, large datasets,
   new infrastructure) is suggested only when nothing lighter works; when that is the only path and the benefit is
   small, Claude skips the pair and it is stored as dismissed (`pipeline.suggest_pending`, 30 per run; suggestions
   written before headlines get theirs from `pipeline.frame_pending`, many per `claude_model` call). Rate them α / β
   on the item's page and on each project's page, mark them done, Implement them, and agents read them over MCP
   (`suggestions`, and "Suggestions you kept" in `project_context`).
 - **Context** is separate from sources. Claude writes one focus brief per active project from your recent agent
-  prompts, commits, dictations, and meetings (`focus.py`, each feed enabled under `[context.<feed>]`). Briefs say
+  prompts, commits, dictations, and meetings (`focus.py`, each feed enabled under `[context.<feed>]`), and from
+  Alpha's own loop (always on): the ideas you wrote for the project and what was built from them or from Alpha's
+  suggestions, with the agent's report of what changed and why. Briefs say
   what you are working on; they drive the discovery queries and the judge. Edit them on the dashboard's Projects
   tab (each project's page). The Projects tab also lists the meetings the last scan read; Exclude (or Use again)
   takes effect at once, and every brief written from meetings before that change is rewritten on the next run.
@@ -283,16 +288,19 @@ or Failed with the reason and Try again. Marking it done stays yours. A project 
 repository or a vault note only) gets a ready-to-run task file instead, `var/handoffs/<project>/<slug>.md` (the
 suggestion, the item's text, the first step, and acceptance checks); nothing runs.
 
-**Let There.** A layer over the apps you build (`letthere/`, its own tool; Alpha's Feed is its first app): rest the
-pointer on anything and a thin frame marks it, press `\` (a normal backslash while you type in a field) to lock the
-frame, and a glass box opens beside it with the cursor inside, so a dictation app such as Superwhisper types
-straight into it. ↑ widens the frame to the surrounding element (↓ narrows it back), Enter saves, Esc closes. The
-note becomes `letthere/var/notes/alpha/<id>.md`: what you said, the element's CSS path and place in the page, its
-text, an HTML excerpt, and a picture of it beside it as `<id>.png`. Start the server with
-`uv run letthere/server.py` (port 3470, standard library only) and set `let_there_url = "http://localhost:3470"`
-in config.toml; any other app on localhost joins with
-`<script src="http://localhost:3470/overlay.js" data-app="NAME" defer></script>`. Notes are saved only for now:
-building each one on a branch comes next.
+**Let There.** A layer over the apps you build, its own tool ([juandi-net/letthere](https://github.com/juandi-net/letthere));
+Alpha's Feed is its first app and Alpha is its coordinator. Moving the pointer shows nothing; press `]` (a normal
+`]` while you type in a field) and the element under the pointer at that moment is framed, and a glass box opens
+beside it with the cursor inside, so a dictation app such as Superwhisper types straight into it. ↑ widens the frame to the
+surrounding element (↓ narrows it back), Enter saves, Esc closes. Let There keeps the note as a markdown file with
+a picture of the element and tells Alpha (`letthere.py`); Alpha files it as a kept idea for the app's project (the
+script tag's `data-app`, matched to a project name; the same card as a Your idea, marked Let There, with the
+element's picture, text, and HTML attached to its item) and, with `let_there_implement = true` (the default),
+starts Implement on it at once, so saying the change is all there is to it. The note's status line follows the
+work: taken, implementing, implemented or failed, done. Setup: run Let There's server with
+`python3 server.py --install --notify http://localhost:3460/letthere` and set `let_there_url = "http://localhost:3470"`
+in config.toml; Alpha then adds the one script tag to the Feed, and `alpha run` also asks for notes still new, so
+none is missed while the dashboard is down. Notes made on an app that is not one of your projects stay new.
 
 ## Agents (MCP)
 

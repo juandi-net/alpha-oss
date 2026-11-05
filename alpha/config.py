@@ -68,7 +68,8 @@ class Settings:
     judge: JudgeSettings = field(default_factory=JudgeSettings)
     context: ContextSettings = field(default_factory=ContextSettings)
     sources: dict[str, dict] = field(default_factory=dict)  # [sources.<name>] tables, read by alpha.sources.config
-    let_there_url: str = ""           # Let There's server (letthere/): its overlay loads on the Feed; empty turns it off
+    let_there_url: str = ""           # Let There's server (its own tool): its overlay loads on the Feed; empty turns it off
+    let_there_implement: bool = True  # a note made on an app starts Implement at once (else it waits as a kept idea)
 
 
 def resolve(value: str) -> Path:
@@ -114,6 +115,7 @@ def load_settings(config_path: Path = CONFIG_PATH) -> Settings:
         context=_context(raw.get("context", {})),
         sources={name: dict(table) for name, table in raw.get("sources", {}).items()},
         let_there_url=str(raw.get("let_there_url", "")).strip().rstrip("/"),
+        let_there_implement=bool(raw.get("let_there_implement", True)),
     )
 
 

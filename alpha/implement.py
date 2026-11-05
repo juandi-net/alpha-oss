@@ -28,7 +28,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from . import focus, omp_agent, own_idea, suggestion_chat, writer
+from . import focus, letthere, omp_agent, own_idea, suggestion_chat, writer
 from .config import TOOL_ROOT, Settings, load_settings
 from .projects import _local_file, _repository_spec
 from .skills import slug
@@ -257,8 +257,16 @@ def questions(connection: sqlite3.Connection, item_id: str, project: str) -> str
 
 
 def own_idea_of(connection: sqlite3.Connection, suggestion: sqlite3.Row) -> str:
-    """The user's own words when they wrote the suggestion themselves (own_idea.py), and the chat that shaped it
-    while it is still there, as a section of the agent's prompt; '' for one Alpha wrote."""
+    """The user's own words when they wrote the suggestion themselves (own_idea.py, with the chat that shaped it
+    while it is still there) or said it on the app itself (letthere.py), as a section of the agent's prompt; ''
+    for one Alpha wrote."""
+    if suggestion["basis_kind"] == "note":
+        media = str(TOOL_ROOT / "var" / "media")
+        return ("\n# The user's note, made on the app itself (Let There)\nThe user pointed at an element of the "
+                "running app and said what should change; the how above is only that, restated. Their words, which "
+                f"take precedence:\n\n{suggestion['basis']}\n\nThe source item below says which element (its CSS "
+                "path, page, text, and HTML excerpt) and names a picture of it under "
+                f"{media}: read the picture first, so you change what they pointed at and nothing else.\n")
     if suggestion["basis_kind"] != "user":
         return ""
     section = ("\n# The user's own idea\nThe user wrote this suggestion themselves; the how above is Alpha's write-up "
@@ -393,6 +401,7 @@ def run(connection: sqlite3.Connection, settings: Settings, item_id: str, projec
                 raise Failure(f"The agent did not finish within {settings.implement_minutes} minutes and had changed "
                               "nothing yet.")
             _set(connection, item_id, project, status="implemented", files=files, finished_at=now())
+            letthere.set_status(settings, item_id, "implemented")
             print(f"Implement: {'stopped at the time limit' if cut_short else 'done'}, {files} file"
                   f"{'' if files == 1 else 's'} changed on {chosen.branch}", flush=True)
         except Exception as error:  # a crashed run must not stay "implementing"
@@ -400,4 +409,5 @@ def run(connection: sqlite3.Connection, settings: Settings, item_id: str, projec
             if not isinstance(error, Failure):
                 print(traceback.format_exc(), flush=True)
             _set(connection, item_id, project, status="failed", error=reason[:4000], finished_at=now())
+            letthere.set_status(settings, item_id, "failed")
             print(f"Implement: failed: {reason}", flush=True)

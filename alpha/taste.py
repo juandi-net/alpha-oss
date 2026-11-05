@@ -36,7 +36,7 @@ def _picked(connection: sqlite3.Connection, limit: int | None = PICKED) -> list[
     a small source (the user's Hugging Face likes) is not drowned by their bookmarks."""
     rows = connection.execute(
         "SELECT id, source, title, summary FROM items WHERE trust = 'curated' AND summary IS NOT NULL "
-        "AND duplicate_of IS NULL ORDER BY rank DESC"
+        "AND duplicate_of IS NULL AND source != 'letthere' ORDER BY rank DESC"
     ).fetchall()
     if limit is None:
         return rows
@@ -92,16 +92,29 @@ def _rated_suggestions(connection: sqlite3.Connection, rating: str) -> list[sqli
     """Suggestions Alpha wrote that the user rated; the ones they wrote themselves are listed apart (_own_ideas)."""
     return connection.execute(
         "SELECT s.project, s.action, s.reason, COALESCE(i.title, i.title_source, '') AS title FROM suggestions s "
-        "JOIN items i ON i.id = s.item_id WHERE s.rating = ? AND s.basis_kind != 'user' ORDER BY s.rated_at DESC LIMIT ?",
+        "JOIN items i ON i.id = s.item_id WHERE s.rating = ? AND s.basis_kind NOT IN ('user', 'note') ORDER BY s.rated_at DESC LIMIT ?",
         (rating, RATED),
     ).fetchall()
 
 
 def _own_ideas(connection: sqlite3.Connection) -> list[sqlite3.Row]:
-    """The user's own ideas (own_idea.py), newest first: their words (basis) and the project."""
+    """The user's own ideas (own_idea.py) and notes made on their apps (letthere.py), newest first: their words
+    (basis) and the project."""
     return connection.execute(
         "SELECT s.project, s.basis, COALESCE(i.title, i.title_source, '') AS title FROM suggestions s "
-        "JOIN items i ON i.id = s.item_id WHERE s.basis_kind = 'user' ORDER BY s.created_at DESC LIMIT ?", (RATED,),
+        "JOIN items i ON i.id = s.item_id WHERE s.basis_kind IN ('user', 'note') ORDER BY s.created_at DESC LIMIT ?",
+        (RATED,),
+    ).fetchall()
+
+
+def _built(connection: sqlite3.Connection) -> list[sqlite3.Row]:
+    """What was built from suggestions (implemented on a branch, handed off as a task, or marked done), newest
+    first, with the first lines of the agent's report."""
+    return connection.execute(
+        "SELECT s.project, s.headline, s.action, s.basis_kind, substr(s.implement_report, 1, 600) AS report, "
+        "COALESCE(i.title, i.title_source, '') AS title FROM suggestions s JOIN items i ON i.id = s.item_id "
+        "WHERE s.implement_status IN ('implemented', 'handoff') OR s.status = 'done' "
+        "ORDER BY COALESCE(s.implement_finished_at, s.rated_at, s.created_at) DESC LIMIT ?", (RATED,),
     ).fetchall()
 
 
@@ -162,9 +175,15 @@ def refresh(connection: sqlite3.Connection, settings: Settings, force: bool = Fa
         if rows:
             listing += f"\n\n{heading}:\n" + "\n".join(f"- {_suggested(r)}" for r in rows)
     if own := _own_ideas(connection):
-        listing += ("\n\nIdeas the user wrote themselves, what they would do with an item in one of their projects (the "
-                    "strongest signal: the applications they want, in their own words):\n"
-                    + "\n".join(f"- for {r['project']}, from “{r['title']}”: {r['basis']}" for r in own))
+        listing += ("\n\nIdeas the user wrote themselves, what they would do with an item in one of their projects, or "
+                    "said while pointing at their own app (the strongest signal: the applications they want, in their "
+                    "own words):\n" + "\n".join(f"- for {r['project']}, from “{r['title']}”: {r['basis']}" for r in own))
+    if built := _built(connection):
+        listing += ("\n\nWhat was built from suggestions (an agent carried these out in the user's projects; what the "
+                    "user takes all the way to code is what they truly value):\n"
+                    + "\n".join(f"- in {r['project']}: {r['headline'] or r['action']}"
+                                + (f" (the agent: {' '.join((r['report'] or '').split())[:300]})" if r['report'] else "")
+                                for r in built))
     text = writer.write_taste(settings.claude_model, listing)
     connection.execute("INSERT INTO taste_profiles (profile, items, sources, created_at) VALUES (?, ?, ?, ?)",
                        (text, len(picked), json.dumps(sources), now()))

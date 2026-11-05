@@ -14,6 +14,10 @@ Activity, all read locally, each feed only when its `[context.<feed>]` table say
 - anarlog: meetings (~/Library/Application Support/hyprnote/app.db, opened read-only): the session's summary
   and notes, or its transcript, from the last `days`; sessions the user excluded on the Focus page are never
   read. Names of the people Anarlog knows are removed from every brief.
+- alpha: Alpha's own loop, from its database, always on: the user's idea chats (their words and the distilled
+  core, own_idea.py) and the suggestions implemented or marked done (headline, how, and the agent's report:
+  what changed and why), each tied to its project. What the user asked to build, and built, is the plainest
+  statement of what they are working on.
 Dictations, meetings, and prompts typed outside any project folder carry no project; Claude assigns the
 relevant ones.
 
@@ -46,7 +50,8 @@ OMP_HISTORY = HOME / ".omp" / "agent" / "history.db"
 CLAUDE_PROJECTS = HOME / ".claude" / "projects"
 SUPERWHISPER = HOME / "Documents" / "superwhisper" / "recordings"
 ANARLOG = HOME / "Library" / "Application Support" / "hyprnote" / "app.db"
-FEEDS = {"agent": "agent prompts", "git": "commits", "dictation": "dictations", "meeting": "meetings"}
+FEEDS = {"agent": "agent prompts", "git": "commits", "dictation": "dictations", "meeting": "meetings",
+         "alpha": "ideas and implementations"}
 
 MIN_NEW_ITEMS = 10
 # Metadata: when the user last excluded a meeting or let one back; briefs written from meetings before it are due.
@@ -56,7 +61,9 @@ SPEC_CHARACTERS = 3000
 ITEM_CHARACTERS = 1200
 MEETING_CHARACTERS = 8000
 # Per source in one brief prompt, newest items first.
-SOURCE_CHARACTERS = {"agent": 40_000, "git": 12_000, "dictation": 20_000, "meeting": 24_000}
+SOURCE_CHARACTERS = {"agent": 40_000, "git": 12_000, "dictation": 20_000, "meeting": 24_000, "alpha": 16_000}
+ALPHA_ITEM_CHARACTERS = 2500  # an idea chat or an implementation report says more than a prompt
+REPORT_CHARACTERS = 1500      # of the agent's report: what it changed and why, before how it checked
 ASSIGN_ITEM_CHARACTERS = 600
 ASSIGN_CHARACTERS = 150_000
 EMAIL = re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+")
@@ -65,7 +72,7 @@ PHONE = re.compile(r"\+?\d[\d ().-]{7,}\d")
 
 @dataclass
 class Item:
-    source: str                      # agent | git | dictation | meeting
+    source: str                      # agent | git | dictation | meeting | alpha
     at: datetime
     text: str
     path: Path | None = None         # the folder an agent prompt was typed in, or a commit's repository
@@ -264,6 +271,41 @@ def meetings(since: datetime) -> list[tuple[str, str, str, str]]:
         connection.close()
 
 
+def alpha_loop(connection: sqlite3.Connection, since: datetime) -> list[Item]:
+    """Alpha's own loop since `since`, each tied to its project: the user's idea chats (their words and the
+    distilled core) and the suggestions implemented or marked done (headline, how, who wrote it, and the agent's
+    report: what changed and why, cut before how it checked)."""
+    items: list[Item] = []
+    for row in connection.execute("SELECT * FROM idea_chats WHERE updated_at > ?", (since.isoformat(),)):
+        messages = json.loads(row["messages"])
+        said = " / ".join(m["content"] for m in messages if m["role"] == "user")
+        plan = writer.IdeaPlan.model_validate_json(row["plan"])
+        kept = "kept as a suggestion" if row["suggested_at"] else "still being shaped"
+        items.append(Item("alpha", datetime.fromisoformat(row["updated_at"]),
+                          f"Idea ({kept}). The user said: {said}\nThe core: {plan.core}\nPlanned: {plan.action}",
+                          project=row["project"]))
+    for row in connection.execute(
+        "SELECT s.*, i.title FROM suggestions s JOIN items i ON i.id = s.item_id WHERE s.basis_kind != 'match' "
+        "OR s.implement_status IS NOT NULL OR s.status = 'done'"
+    ):
+        at = row["implement_finished_at"] or row["implement_started_at"] or row["rated_at"] or row["created_at"]
+        if not at or at <= since.isoformat() or row["implement_status"] not in ("implemented", "handoff") and row["status"] != "done":
+            continue
+        who = {"user": "the user's own idea", "note": "a note the user made on the app itself"}.get(
+            row["basis_kind"], f"Alpha's suggestion from “{row['title']}”")
+        report = (row["implement_report"] or "").split("## How I checked", 1)[0].strip()[:REPORT_CHARACTERS]
+        state = ("marked done by the user" if row["status"] == "done" else
+                 f"implemented on branch {row['implement_branch']}, waiting for review" if row["implement_status"] == "implemented"
+                 else "written as a task file")
+        text = f"Built ({who}; {state}): {row['headline'] or row['action']}\nHow: {row['action']}"
+        if row["basis_kind"] in ("user", "note"):
+            text += f"\nIn the user's words: {row['basis']}"
+        if report:
+            text += f"\nThe agent's report: {report}"
+        items.append(Item("alpha", datetime.fromisoformat(at), text, project=row["project"]))
+    return items
+
+
 def person_names() -> set[str]:
     """Names of people Anarlog knows (meeting participants and contacts), removed from every brief. A single
     name part that is also an ordinary word (Will, Bill) is left alone, so sentences survive."""
@@ -344,6 +386,14 @@ def scan(connection: sqlite3.Connection, settings: Settings) -> tuple[list[Proje
         for project in projects:
             if project.folder:
                 project.items += commits(project.folder, since)
+    by_name = {_normal(p.name): p for p in projects}
+    for item in alpha_loop(connection, since):  # already tied to a project; one not active yet becomes active
+        owner = by_name.get(_normal(item.project or ""))
+        if owner is None:
+            owner = Project(item.project, "", None, None)
+            projects.append(owner)
+            by_name[_normal(owner.name)] = owner
+        owner.items.append(item)
     unassigned: list[Item] = []
     prompts = agent_prompts(since) if context.agents else []
     for item in prompts:
@@ -397,7 +447,7 @@ def _activity(project: Project) -> str:
     for source, label in FEEDS.items():
         lines, size = [], 0
         for item in sorted((i for i in project.items if i.source == source), key=lambda i: i.at, reverse=True):
-            limit = MEETING_CHARACTERS if source == "meeting" else ITEM_CHARACTERS
+            limit = {"meeting": MEETING_CHARACTERS, "alpha": ALPHA_ITEM_CHARACTERS}.get(source, ITEM_CHARACTERS)
             line = f"- {item.at:%Y-%m-%d}: {' '.join(item.text.split())[:limit]}"
             if size + len(line) > SOURCE_CHARACTERS[source]:
                 break
