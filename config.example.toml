@@ -128,6 +128,15 @@ search_pages = 2      # result pages per query
 requery_days = 14     # a query is searched again after this many days
 archive_publications = 3  # publications with finds whose archive gets one more page read per run
 
+[sources.substack_following]  # discovered: new posts from the Substacks you subscribe to, judged against your taste
+# Needs SUBSTACK_SID in .env; it is sent only to substack.com, once per run, to list your subscriptions.
+enabled = false
+every_hours = 20
+request_delay_seconds = 2.0
+max_requests = 300          # per run: one archive page per publication, then one read per post judged
+first_days = 7             # the first run looks back this far; later runs read what was published since the last
+per_publication = 10       # newest posts listed per publication and run
+
 [sources.papers]                 # discovered: papers that ship code, models or datasets (Hugging Face Daily Papers + paper search; free, no key)
 enabled = false
 every_hours = 20                 # one pass a day; each pass reads the Daily Papers list

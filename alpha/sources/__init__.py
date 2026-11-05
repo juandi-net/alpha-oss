@@ -39,13 +39,13 @@ from types import ModuleType
 
 from ..config import SECRET_NAMES, Settings, source_config
 from ..storage import get_metadata, set_metadata
-from . import (github_stars, github_trending, hf_following, hf_likes, hf_trending, huggingface, papers, substack, x,
-               x_timeline)
+from . import (github_stars, github_trending, hf_following, hf_likes, hf_trending, huggingface, papers, substack,
+               substack_following, x, x_timeline)
 
 SOURCES: dict[str, ModuleType] = {
     module.NAME: module
-    for module in (x, github_stars, hf_likes, x_timeline, substack, papers, huggingface, hf_following,
-                   github_trending, hf_trending)
+    for module in (x, github_stars, hf_likes, x_timeline, substack, substack_following, papers, huggingface,
+                   hf_following, github_trending, hf_trending)
 }
 
 

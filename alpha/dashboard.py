@@ -76,7 +76,8 @@ SUGGESTION_VIEWS = {"": "To do", "beta": "Rated β", "done": "Done"}
 SOURCE_LABELS = {"x": "X bookmarks", "x_timeline": "X timeline", "substack": "Substack", "github_stars": "GitHub stars",
                  "huggingface": "Hugging Face datasets", "hf_likes": "Hugging Face likes",
                  "hf_following": "Hugging Face follows", "papers": "Papers", "arxiv": "arXiv",
-                 "github_trending": "GitHub trending", "hf_trending": "Hugging Face trending"}
+                 "github_trending": "GitHub trending", "hf_trending": "Hugging Face trending",
+                 "substack_following": "Substack subscriptions"}
 X_SOURCES = ("x", "x_timeline")
 # Where on X a timeline find came from (candidates.query of an x_timeline candidate).
 TIMELINE_TABS = {"following": "from your Following", "for_you": "from For You"}
@@ -453,6 +454,8 @@ def _how(row: sqlite3.Row, settings: Settings, titles: dict[str, str], action: s
         came = f"{source}, searching an agent's request “{escape(row['request_query'])}”"
     elif row["searched"] and row["source"] == "hf_following":  # the query is the followed account it came from
         came = f"{source}, released by {escape(row['searched'])}, an account you follow"
+    elif row["searched"] and row["source"] == "substack_following":  # the query is the publication it came from
+        came = f"{source}, from {escape(row['searched'])}, a newsletter you subscribe to"
     elif row["searched"]:
         came = f"{source}, searching “{escape(row['searched'])}”"
     else:

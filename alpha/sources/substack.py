@@ -210,9 +210,13 @@ def discover(connection: sqlite3.Connection, settings: Settings, needs: list[Nee
 
 
 def fetch_text(connection: sqlite3.Connection, settings: Settings, candidate: sqlite3.Row) -> str:
+    return read_post(client(connection, settings), candidate)
+
+
+def read_post(reader: Client, candidate: sqlite3.Row) -> str:
     """The post's text: the whole post when free, the public preview (marked as such) when paid."""
     raw = json.loads(candidate["raw"])
-    post = client(connection, settings).post(candidate["url"], raw["slug"])
+    post = reader.post(candidate["url"], raw["slug"])
     text = text_of(post) or candidate["preview"] or ""
     return text if is_free(post) else f"{PAID_NOTE}\n\n{text}"
 

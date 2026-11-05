@@ -3,9 +3,9 @@
 # Alpha
 
 Alpha is a stream of alpha: it pulls from many sources (what you save: X bookmarks, GitHub stars, Hugging Face likes;
-what it finds for you: your X Following and For You timelines, what the Hugging Face accounts you follow release,
-what is trending on GitHub and Hugging Face, Substack, papers that ship code, Hugging Face datasets), keeps only the
-real signal, and turns it into actionable skills your AI agents use.
+what it finds for you: your X Following and For You timelines, the Substacks you subscribe to, what the Hugging Face
+accounts you follow release, what is trending on GitHub and Hugging Face, Substack search, papers that ship code,
+Hugging Face datasets), keeps only the real signal, and turns it into actionable skills your AI agents use.
 
 How: one hard judge for everything Alpha finds (your bookmarks teach it your taste; your projects' focus briefs tell
 it what matters now), one warehouse, a feed you scroll instead of X, skills built and tested from what lands there,
@@ -55,9 +55,9 @@ sources ──> (discovered only: judge) ──> warehouse (SQLite) ──> outp
 - **Taste**: Claude writes a short profile of what you keep and what you would call slop from everything you picked
   (X bookmarks, GitHub stars, Hugging Face likes, sampled so each source is represented) and your α / β ratings on
   items and suggestions, and rewrites it weekly or on the next run after a rating changes (`taste.py`). Your
-  timelines and your Hugging Face follows are judged against it, with the three most similar picked items as
-  examples and up to three similar β items as counter-examples, so a post you would have saved gets in even when it
-  fits no project.
+  timelines, your Substack subscriptions, your Hugging Face follows, and the trending feeds are judged against it,
+  with the three most similar picked items as examples and up to three similar β items as counter-examples, so a
+  post you would have saved gets in even when it fits no project.
 - **Suggestions**: for every item that fits a project (and every find or idea, for the project it was found for),
   Claude (`skill_model`, Opus) rewrites why it fits as one action, in one call: a headline (the benefit for the
   project in 6 to 12 plain words, no model names or jargon), the outcome to expect (one plain sentence), how
@@ -104,6 +104,7 @@ in `[project_repositories]` (local) or `[project_github]` (via `gh`). A changed 
 | `github_stars` | curated | repo | `gh auth login`, or `GITHUB_TOKEN` in .env | `[sources.github_stars]`: `every_hours` (6), `readmes` (300), `readme_characters` (12000) |
 | `x_timeline` | discovered | post | same as `x` (one X session per run with the bookmarks) | `[sources.x_timeline]`: `every_hours` (20), `following_scrolls` (60, a safety cap: Following stops at posts already seen), `for_you_scrolls` (30) |
 | `substack` | discovered | article | nothing beyond Claude and Jev | `[sources.substack]`: `every_hours` (20), `max_requests` (120), `request_delay_seconds` (3) |
+| `substack_following` | discovered | article | `SUBSTACK_SID` in .env (the `substack.sid` cookie of a logged-in substack.com tab) | `[sources.substack_following]`: `every_hours` (20), `max_requests` (300), `first_days` (7), `per_publication` (10) |
 | `papers` | discovered | paper | nothing (free public APIs) | `[sources.papers]`: `every_hours` (20), `max_requests` (150), `daily_papers` (50) |
 | `huggingface` | discovered | dataset | nothing (free public API) | `[sources.huggingface]`: `every_hours` (168), `max_requests` (40), `min_downloads` (20) or `min_likes` (2) |
 | `hf_likes` | curated | model, dataset, space | `HF_TOKEN` in .env, or a token saved by `hf auth login` | `[sources.hf_likes]`: `every_hours` (6), `max_requests` (100), `cards` (40), `card_characters` (12000) |
@@ -119,6 +120,13 @@ paywalls are never worked around (paid posts are judged on their public preview 
 Face Daily Papers each day plus paper search for the needs weekly; only papers with a code repository or models or
 datasets on Hugging Face reach the judge, and their text is the title, abstract, what was released, and the
 repository README's opening (no PDFs).
+
+Substack subscriptions reads the newsletters you subscribe to. Your session cookie goes to substack.com only, in one
+request per run, to list your subscriptions; each publication's newest posts and their text are then read without
+it, through the same polite, cached client as Substack search (one archive page per publication per run, oldest-read
+first when the budget runs short). Each run reads what was published since the last complete listing (the first
+run: the last 7 days), skips posts Alpha has already seen from any source, and judges the rest like your timelines:
+against your briefs and your taste. Paid posts are judged on their public preview, even ones you pay for.
 
 Hugging Face likes are stored newest first and ranked like GitHub stars; each item's text is the repo's key
 metadata (task, license, size, downloads, likes) and its card. Hugging Face follows lists, each run, the models,
