@@ -143,6 +143,14 @@ def explain_pending(connection: sqlite3.Connection, settings: Settings) -> None:
     parallel(rows, task, store, "Match reasons (Claude)")
 
 
+def project_texts(connection: sqlite3.Connection) -> dict[str, str]:
+    """What each project is, for writing a suggestion: its latest focus brief, else its spec."""
+    texts = {row["name"]: row["spec"] for row in connection.execute("SELECT name, spec FROM projects")}
+    texts |= {row["project"]: row["brief"] for row in connection.execute(
+        "SELECT project, brief FROM focus_briefs WHERE id IN (SELECT MAX(id) FROM focus_briefs GROUP BY project)")}
+    return texts
+
+
 def suggest_pending(connection: sqlite3.Connection, settings: Settings) -> None:
     """One suggestion (a concrete action, writer.suggest) per item and project without one: every match above the
     threshold that has its reason, and each find or idea for the project it was found for (from the judge's why).
@@ -168,9 +176,7 @@ def suggest_pending(connection: sqlite3.Connection, settings: Settings) -> None:
     ).fetchall()
     if not pairs:
         return
-    texts = {row["name"]: row["spec"] for row in connection.execute("SELECT name, spec FROM projects")}
-    texts |= {row["project"]: row["brief"] for row in connection.execute(
-        "SELECT project, brief FROM focus_briefs WHERE id IN (SELECT MAX(id) FROM focus_briefs GROUP BY project)")}
+    texts = project_texts(connection)
     work = []
     for pair in pairs:
         basis = "\n".join(filter(None, (f"The match reason: {pair['reason']}" if pair["reason"] else "",

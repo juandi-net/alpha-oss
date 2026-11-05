@@ -568,6 +568,8 @@ def _suggestion_rows(connection: sqlite3.Connection, project: str | None, status
 
 def _suggestion_line(row: sqlite3.Row) -> str:
     rating = {"alpha": "α kept", "beta": "β skipped"}.get(row["rating"] or "", "not rated")
+    if row["basis_kind"] == "user":
+        rating = f"the user's own idea, in their words: “{_clip(row['basis'], 300)}”; {rating}"
     state = "" if row["status"] == "open" else f", {row['status']}"
     benefit = f"{row['headline']}: {row['outcome']} How: " if row["headline"] and row["outcome"] else ""
     effort = f"{row['effort']} effort; " if row["effort"] else ""

@@ -1,6 +1,7 @@
 """The user's taste: what they keep and what they call slop, written by Claude from everything they picked (X
-bookmarks, GitHub stars, Hugging Face likes: every curated source, sampled so each is represented) and their α / β
-ratings in the dashboard, and rewritten weekly or on the next run after a rating changes. The judge gives it, with
+bookmarks, GitHub stars, Hugging Face likes: every curated source, sampled so each is represented), their α / β
+ratings in the dashboard, and the ideas they wrote themselves for an item in a project (own_idea.py, the strongest
+signal), and rewritten weekly or on the next run after a rating changes. The judge gives it, with
 the three picked items and the three β items most like the candidate as examples and counter-examples, to both
 stage-2 judges for feed sources (a source with TASTE = True, such as the X timelines and Hugging Face follows), and
 stage 1 lets a candidate through when it fits the user's taste even if it fits no project's focus brief."""
@@ -88,10 +89,19 @@ def rate(connection: sqlite3.Connection, item_id: str, rating: str | None, reaso
 
 
 def _rated_suggestions(connection: sqlite3.Connection, rating: str) -> list[sqlite3.Row]:
+    """Suggestions Alpha wrote that the user rated; the ones they wrote themselves are listed apart (_own_ideas)."""
     return connection.execute(
         "SELECT s.project, s.action, s.reason, COALESCE(i.title, i.title_source, '') AS title FROM suggestions s "
-        "JOIN items i ON i.id = s.item_id WHERE s.rating = ? ORDER BY s.rated_at DESC LIMIT ?",
+        "JOIN items i ON i.id = s.item_id WHERE s.rating = ? AND s.basis_kind != 'user' ORDER BY s.rated_at DESC LIMIT ?",
         (rating, RATED),
+    ).fetchall()
+
+
+def _own_ideas(connection: sqlite3.Connection) -> list[sqlite3.Row]:
+    """The user's own ideas (own_idea.py), newest first: their words (basis) and the project."""
+    return connection.execute(
+        "SELECT s.project, s.basis, COALESCE(i.title, i.title_source, '') AS title FROM suggestions s "
+        "JOIN items i ON i.id = s.item_id WHERE s.basis_kind = 'user' ORDER BY s.created_at DESC LIMIT ?", (RATED,),
     ).fetchall()
 
 
@@ -151,12 +161,16 @@ def refresh(connection: sqlite3.Connection, settings: Settings, force: bool = Fa
         rows = _rated_suggestions(connection, rating)
         if rows:
             listing += f"\n\n{heading}:\n" + "\n".join(f"- {_suggested(r)}" for r in rows)
+    if own := _own_ideas(connection):
+        listing += ("\n\nIdeas the user wrote themselves, what they would do with an item in one of their projects (the "
+                    "strongest signal: the applications they want, in their own words):\n"
+                    + "\n".join(f"- for {r['project']}, from “{r['title']}”: {r['basis']}" for r in own))
     text = writer.write_taste(settings.claude_model, listing)
     connection.execute("INSERT INTO taste_profiles (profile, items, sources, created_at) VALUES (?, ?, ?, ?)",
                        (text, len(picked), json.dumps(sources), now()))
     connection.commit()
     print(f"Taste: profile written from {len(picked)} picked items ({', '.join(f'{n} {s}' for s, n in sources.items())}), "
-          f"{len(kept)} α and {len(rejected)} β ratings")
+          f"{len(kept)} α and {len(rejected)} β ratings, {len(own)} own idea{'' if len(own) == 1 else 's'}")
     return text
 
 

@@ -396,6 +396,41 @@ def suggest(model: str, item: sqlite3.Row, project_name: str, project_text: str,
     })
 
 
+OWN_IDEA_SYSTEM = (
+    "The user collected an item (a post, article, paper, repo, dataset, model, or Space) and has their own idea of what "
+    "to do with it in one of their projects. Write that idea up as a suggestion they will rate and may carry out: the "
+    "headline (the benefit), the outcome, the how, and the effort.\n\n"
+    "The idea is theirs: keep its intent, scope, and the part of the project it names. Do not replace it with another "
+    "application, do not add a second one, and never skip it (skip is always false). Fill in only what it leaves open: "
+    "the specific method or number from the item it relies on, and the first step, from the project's description and "
+    "the item.\n\n"
+    "How: 1 to 3 sentences in this form: \"In <project>: <do X>, because <Y>; first step: <Z>.\" The first step is "
+    "something the user could start today in under an hour. No hedging (no might, consider, explore), no preamble, no "
+    "restating the item.\n\n"
+    "Effort: small (under an hour of agent or human work), medium (about a day), large (days, or new "
+    "infrastructure).\n\n"
+    + PLAIN_RULE
+)
+
+
+def suggest_from_idea(model: str, item: sqlite3.Row, project_name: str, project_text: str, idea: str) -> Suggestion:
+    """The user's own idea for the item in the project, written up as a suggestion (headline, outcome, how, effort)
+    that keeps their intent; never skipped."""
+    content = (
+        f"Project: {project_name}\n\nWhat the project is and what the user is working on:\n{project_text}\n\n---\n\n"
+        f"The user's idea, in their words:\n{idea}\n\n---\n\n"
+        f"Item ({item['kind']}): {item['title'] or item['title_source'] or item['url']}\n{item['summary'] or ''}\n\n"
+        f"{item_text(item)[:SUMMARY_ITEM_CHARACTERS]}"
+    )
+    suggestion = _stream_parsed(model, OWN_IDEA_SYSTEM, content, Suggestion, MAX_TOKENS)
+    effort = suggestion.effort.strip().lower()
+    return suggestion.model_copy(update={
+        "skip": False, "skip_reason": "",
+        "headline": suggestion.headline.strip().rstrip("."), "outcome": suggestion.outcome.strip(),
+        "action": suggestion.action.strip(), "effort": effort if effort in ("small", "medium", "large") else "medium",
+    })
+
+
 def frame(model: str, suggestions: list[tuple[str, str]]) -> list[Framing | None]:
     """Headline and outcome for many existing suggestions in one call, from their own text; `suggestions` are
     (project, how). A suggestion the answer skipped gets None."""
@@ -760,7 +795,9 @@ def search_queries(model: str, project: str, brief: str) -> list[str]:
 TASTE_SYSTEM = (
     "You write the user's taste profile from their picks: posts they bookmarked on X, repos they starred on GitHub, "
     "and models, datasets, and Spaces they liked on Hugging Face (title and summary of each, newest first, sampled "
-    "across the sources), then the items and suggestions they rated α (keep) or β (no edge) in their Alpha feed. "
+    "across the sources), then the items and suggestions they rated α (keep) or β (no edge) in their Alpha feed, and "
+    "the ideas they wrote themselves (what they would do with an item in a project): weigh those most, they say in "
+    "the user's own words what they want items for. "
     "It is given to a judge that reads the user's X timelines and Hugging Face releases from accounts they follow, so "
     "they need not check them, and must pass only what they would have picked. Say what they keep: the topics, "
     "the kind of post (exact steps, numbers, tools, code, first-hand results), the kinds of repos and of models, "

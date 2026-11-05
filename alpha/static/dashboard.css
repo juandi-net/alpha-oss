@@ -519,6 +519,15 @@ ul.suggestions .suggestion { margin-top: 0; }
 .suggestion .from .chip { margin-left: 8px; }
 #suggestions h2 { margin-top: 0; }
 
+/* Your idea: the user's own suggestion, marked as theirs; the form that writes one sits under an item's matches. */
+.chip.yours { color: var(--brass); border-color: var(--brass); background: none; }
+.suggestion .headline .chip { vertical-align: 2px; }
+details.own-idea { margin-top: 12px; border-top: 1px solid var(--rule); padding-top: 8px; }
+details.own-idea > summary { cursor: pointer; color: var(--brass); font-size: 13px; font-weight: 500; }
+details.own-idea .note, details.own-idea .error { font-size: 13px; margin-top: 6px; }
+details.own-idea form { margin-top: 8px; }
+details.own-idea textarea { font-size: 14px; }
+
 /* Ask about this: questions about a suggestion, in the skill chat's bubbles. */
 .suggestion details.ask { margin-top: 8px; border-top: 1px solid var(--rule); padding-top: 6px; }
 .suggestion details.ask > summary { cursor: pointer; color: var(--brass); font-size: 13px; font-weight: 500; }

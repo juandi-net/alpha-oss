@@ -243,6 +243,7 @@ CREATE TABLE IF NOT EXISTS ratings (
 
 -- What to do with an item in a project: one concrete action per item and project, written by Claude from the match
 -- reason (relevance) or the judge's why (a find or idea, for the project it was found for); pipeline.suggest_pending.
+-- Or the user's own idea (own_idea.py): basis_kind user, basis their words, rated α when written.
 -- The user rates them α / β like items (taste.py learns from both) and marks them done once they have acted on one.
 CREATE TABLE IF NOT EXISTS suggestions (
     item_id TEXT NOT NULL REFERENCES items(id),
@@ -251,8 +252,8 @@ CREATE TABLE IF NOT EXISTS suggestions (
     headline TEXT,                   -- 6 to 12 plain words: the benefit for the project (the Feed's title for it)
     outcome TEXT,                    -- one plain sentence: the outcome the user can expect
     effort TEXT,                     -- small (under an hour) | medium (about a day) | large (days, new infrastructure)
-    basis TEXT NOT NULL,             -- what it was written from: the match reason and/or the judge's why
-    basis_kind TEXT NOT NULL,        -- match | judge | both
+    basis TEXT NOT NULL,             -- what it was written from: the match reason and/or the judge's why, or the user's idea
+    basis_kind TEXT NOT NULL,        -- match | judge | both | user
     model TEXT NOT NULL,             -- Claude model that wrote it
     created_at TEXT NOT NULL,
     rating TEXT,                     -- alpha | beta | NULL

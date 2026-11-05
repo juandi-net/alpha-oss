@@ -73,7 +73,7 @@ its repository, on the new branch {branch}; the user's own working folder is els
 Outcome the user expects: {outcome}
 
 How (start here): {action}
-{questions}
+{own}{questions}
 # Rules
 - Start with the first step. Keep the change small and reviewable: the smallest change that carries out the first \
 step well, in the project's own style and structure, in as few files as you can. Read only what you need (search, \
@@ -115,7 +115,7 @@ Source: {title}, {url}
 
 ## Task
 {action}
-{questions}
+{own}{questions}
 ## First step
 {first_step}
 
@@ -247,7 +247,7 @@ def _context(connection: sqlite3.Connection, plan: Plan) -> dict[str, str]:
     item = plan.item
     return {
         "project": project, "branch": plan.branch, "headline": plan.headline, "commands": ", ".join(CHECK_COMMANDS),
-        "questions": questions(connection, plan.item["id"], project),
+        "questions": questions(connection, plan.item["id"], project), "own": own_idea_of(plan.suggestion),
         "outcome": plan.suggestion["outcome"] or "(not written)", "action": plan.suggestion["action"],
         "first_step": first_step(plan.suggestion["action"]),
         "spec": (spec or "(no description)")[:SPEC_CHARACTERS], "brief": brief["brief"] if brief else "(none yet)",
@@ -265,6 +265,15 @@ def questions(connection: sqlite3.Connection, item_id: str, project: str) -> str
     return ("\n# The user's questions and answers about it\nThe user asked about this suggestion before implementing. "
             "Their decisions and constraints here take precedence over the suggestion.\n\n"
             f"{suggestion_chat.transcript(messages)}\n")
+
+
+def own_idea_of(suggestion: sqlite3.Row) -> str:
+    """The user's own words when they wrote the suggestion themselves (own_idea.py), as a section of the agent's
+    prompt; '' for one Alpha wrote."""
+    if suggestion["basis_kind"] != "user":
+        return ""
+    return ("\n# The user's own idea\nThe user wrote this suggestion themselves; the how above is Alpha's write-up of "
+            f"it. Their words, which take precedence:\n\n{suggestion['basis']}\n")
 
 
 def _set(connection: sqlite3.Connection, item_id: str, project: str, **values) -> None:

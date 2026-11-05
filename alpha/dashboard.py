@@ -10,8 +10,9 @@ as a banner on every page until it clears.
 Every request reads config.toml and the database again, so a scheduled run or a new threshold shows up on the
 next page load without restarting the server. The pages are server-rendered HTML; alpha/static holds the one
 stylesheet and the small script (live search, more results, waiting buttons, α / β saved in place, the live run
-ledger, keyboard shortcuts, copy buttons, running clocks). An item's page holds the skill chat (skill_chat.py), and
-each suggestion its Ask about this (suggestion_chat.py); both call Claude while the request waits. Builds,
+ledger, keyboard shortcuts, copy buttons, running clocks). An item's page holds the skill chat (skill_chat.py), Your
+idea (own_idea.py: the user's own suggestion for a project, rated α), and each suggestion its Ask about this
+(suggestion_chat.py); all three call Claude while the request waits. Builds,
 proposals, publishing, rejecting, and the competing-skills check
 start the `skills` CLI command in the background, and Implement the `implement` command (implement.py). Removing an
 item from a skill, editing a brief, filing a discovery request, and rating an item α or β (taste.py; the next run
@@ -37,7 +38,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, parse_qsl, quote, unquote, urlencode, urlparse
 
-from . import focus, implement, skill_chat, suggestion_chat, taste
+from . import focus, implement, own_idea, skill_chat, suggestion_chat, taste
 from .config import TOOL_ROOT, Settings, load_settings
 from .install import RUN_INTERVAL_SECONDS
 from .render import duplicates_by_original
@@ -617,14 +618,17 @@ def _suggestion(item_id: str, suggestion: sqlite3.Row | None, item: sqlite3.Row 
     project = suggestion["project"]
     base = f"/item/{quote(item_id)}/suggestion/{quote(project, safe='')}"
     done = suggestion["status"] == "done"
+    yours = '<span class="chip yours" title="You wrote this one">Your idea</span>' if suggestion["basis_kind"] == "user" else ""
     if suggestion["headline"]:
-        headline = f'<span class="headline">{escape(suggestion["headline"])}</span>'
+        headline = f'<span class="headline">{yours}{escape(suggestion["headline"])}</span>'
         outcome = f'<span class="outcome">{escape(suggestion["outcome"])}</span>' if suggestion["outcome"] else ""
         if suggestion["effort"]:
             outcome += f'<span class="note"> · {escape(suggestion["effort"])} effort</span>'
         how = f'<p class="action"><span class="label">How</span>{escape(suggestion["action"])}</p>'
     else:  # written before headlines, until the next run gives it one
-        headline, outcome, how = f'<span class="headline">{escape(suggestion["action"])}</span>', "", ""
+        headline, outcome, how = f'<span class="headline">{yours}{escape(suggestion["action"])}</span>', "", ""
+    if yours:
+        how += f'<p class="action"><span class="label">You wrote</span>{escape(suggestion["basis"])}</p>'
     ask = _ask(item_id, project, chat or [], error)
     if item is not None:
         idea = '<span class="chip idea">Idea</span>' if item["tier"] == "idea" else ""
@@ -1285,11 +1289,34 @@ def _skill_section(connection: sqlite3.Connection, settings: Settings, item_id: 
     return "".join(parts)
 
 
+def _own_idea_form(connection: sqlite3.Connection, item_id: str, matched: list[str], suggested: set[str],
+                   error: str) -> str:
+    """Your idea: the user names a project and says what they would do with the item there, and Claude writes it up
+    as an α-rated suggestion while the request waits (own_idea.py). Projects that fit the item come first, then the
+    rest with a spec or a brief; one that already has a live suggestion is not offered (rate or ask about that one)."""
+    known = own_idea.projects(connection)
+    names = [name for name in matched if name not in suggested and name in known]
+    names += [name for name in known if name not in suggested and name not in names]
+    if not names:
+        return ""
+    options = "".join(f'<option value="{escape(name)}">{escape(name)}</option>' for name in names)
+    failed = f'<p class="error">Not written: {escape(error)}</p>' if error else ""
+    return (
+        f'<details class="own-idea" id="own-idea"{" open" if error else ""}><summary>Your idea</summary>'
+        '<p class="note">See a use Alpha did not? Say what you would do with this in a project. It becomes a '
+        "suggestion rated α, in your words, and teaches Alpha what you want items for.</p>"
+        f'{failed}<form class="wait stack" data-wait="Writing…" method="post" action="/item/{quote(item_id)}/idea">'
+        f'<select name="project" aria-label="Project">{options}</select>'
+        '<textarea name="idea" rows="3" required placeholder="What you would do with this there (⌘↩ sends)"></textarea>'
+        '<button class="primary">Make it a suggestion</button></form></details>'
+    )
+
+
 def item_page(settings: Settings, item_id: str, notice: str = "", error: str = "", *, seen: str,
-              ask_error: tuple[str, str] = ("", "")) -> str | None:
+              ask_error: tuple[str, str] = ("", ""), idea_error: str = "") -> str | None:
     """One item: everything kept from it, its project matches and skills, the skill chat (not for resources:
-    datasets, models, Spaces), and Ask about this under each suggestion (`ask_error`: the anchor of the one whose
-    last question failed, and why)."""
+    datasets, models, Spaces), Ask about this under each suggestion (`ask_error`: the anchor of the one whose
+    last question failed, and why), and Your idea (`idea_error`: why the last one was not written)."""
     connection = _connect(settings)
     try:
         row = connection.execute(
@@ -1336,12 +1363,14 @@ def item_page(settings: Settings, item_id: str, notice: str = "", error: str = "
             f'<p>{escape(m["reason"] or "Reason pending.")}</p>{suggested(m["project"])}</li>'
             for m in matches
         )
-        projects += "".join(  # suggestions for the project a find or idea was found for, when it is not a match
-            f'<li><a href="/project/{quote(name)}">{escape(name)}</a><span class="note"> found for</span>'
+        projects += "".join(  # suggestions for a project that is not a match: found for it, or the user's own idea
+            f'<li><a href="/project/{quote(name)}">{escape(name)}</a>'
+            f'<span class="note"> {"your idea" if suggestions[name]["basis_kind"] == "user" else "found for"}</span>'
             f"{suggested(name)}</li>"
             for name in suggestions if name not in {m["project"] for m in matches}
         )
         projects = f'<ul class="matches">{projects}</ul>' if projects else '<p class="note">No project fits this one yet.</p>'
+        projects += _own_idea_form(connection, idea, [m["project"] for m in matches], set(suggestions), idea_error)
         unrated_idea = row["tier"] == "idea"
         feeds_skills = row["kind"] in SKILL_KINDS and not unrated_idea
         skills_html = (f'<p class="note">{KIND_LABELS.get(row["kind"], row["kind"])} never feed skills; this one shows '
@@ -2712,7 +2741,7 @@ class _Handler(BaseHTTPRequestHandler):
         elif path.startswith("/item/") and ITEM_ID.fullmatch(item_id):
             added = "Added. A live skill gets an update to review on the Skills tab after the next run; Rebuild there to do it now."
             html = item_page(settings, item_id, added if "added" in query else "", field("error"), seen=seen,
-                             ask_error=ask_error)
+                             ask_error=ask_error, idea_error=field("idea_error"))
         else:
             html = None
         self._send(200 if html else 404, html.encode() if html else NOT_FOUND, cookies=cookies if html else ())
@@ -2738,6 +2767,13 @@ class _Handler(BaseHTTPRequestHandler):
                 location = "/skills?started=build"
             elif action == "add" and skill_chat.add_to_topic(connection, item_id, field("topic")):
                 location += "?added=1"
+            elif action == "idea":
+                try:
+                    own_idea.add(connection, settings, item_id, field("project"), field("idea"))
+                except Exception as error:  # shown under Your idea; it can be sent again (a refusal in plain words)
+                    why = str(error) if isinstance(error, ValueError) else f"{type(error).__name__}: {error}"
+                    location = f"{base}?{urlencode({'idea_error': why[:300]})}"
+                location += "#own-idea"
             else:
                 self._send(404, NOT_FOUND)
                 return

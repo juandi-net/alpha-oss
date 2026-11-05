@@ -53,8 +53,9 @@ sources ──> (discovered only: judge) ──> warehouse (SQLite) ──> outp
   later), a new candidate becomes an **idea**: an item with a quiet Idea mark in the Feed and the Ideas filter. Rate
   an idea α and it becomes a find; until then it feeds no skill.
 - **Taste**: Claude writes a short profile of what you keep and what you would call slop from everything you picked
-  (X bookmarks, GitHub stars, Hugging Face likes, sampled so each source is represented) and your α / β ratings on
-  items and suggestions, and rewrites it weekly or on the next run after a rating changes (`taste.py`). Your
+  (X bookmarks, GitHub stars, Hugging Face likes, sampled so each source is represented), your α / β ratings on
+  items and suggestions, and the ideas you wrote yourself (weighed most), and rewrites it weekly or on the next run
+  after a rating changes (`taste.py`). Your
   timelines, your Substack subscriptions, your Hugging Face follows, and the trending feeds are judged against it,
   with the three most similar picked items as examples and up to three similar β items as counter-examples, so a
   post you would have saved gets in even when it fits no project.
@@ -233,6 +234,15 @@ counter-examples.
 the outcome to expect, then the item and source it came from; the how and the judge's why are under "how?" and on the
 item's page. Each project's page lists its suggestions under What to do, headline and outcome first, opening to the
 how and the item: the ones you rated α first, then the unrated; β-rated and done ones each have a filter.
+
+**Your idea.** When you see a use Alpha did not, open the item, pick the project under Your idea (at the foot of
+Fits your projects), and say what you would do with it there. Claude (`claude_model`) writes it up as a suggestion
+that keeps your intent (headline, outcome, how, effort; `own_idea.py`, `writer.suggest_from_idea`), stored rated α
+with your words as its basis and marked Your idea wherever it shows. From there it is a suggestion like any other:
+Ask about this, Implement (the agent is given your words, which take precedence over the write-up), Mark done, and
+agents see it over MCP. It is the strongest signal Alpha has of what you want items for: the next taste profile
+lists your own ideas under their own heading. A project with a live suggestion for the item is not offered (rate or
+ask about that one); one Alpha skipped is replaced.
 
 **Ask about this.** Under each suggestion on an item's page (and in a project's list, once opened), ask questions
 before you implement it, for example "how would this affect X, and how much work is it?". Claude (`claude_model`)
