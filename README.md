@@ -342,8 +342,10 @@ uv run alpha skills overlap                     # skills an agent could confuse,
 
 Raw agent prompts, dictations, and meeting text go only to Claude, which writes the briefs; briefs carry no personal
 details or names (Claude is told so, and known meeting participants, emails, and phone numbers are also removed in
-code). Jev sees only briefs and item text. Search engines see only queries (topics, no names). Logs carry counts,
-never text. The dashboard listens on 127.0.0.1 only. `.env`, `config.toml`, and `var/` are git-ignored.
+code). Jev sees only briefs and item text. Search engines see only queries (topics, no names). Session cookies stay
+in `.env` and go only to their own site: X's to x.com, Substack's to substack.com (one request per run, to list your
+subscriptions). Logs carry counts, never text or secrets. The dashboard listens on 127.0.0.1 only. `.env`,
+`config.toml`, and `var/` are git-ignored.
 
 ## Costs
 
