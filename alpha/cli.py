@@ -222,7 +222,7 @@ def main() -> None:
     commands.add_parser("process", help="summarize, classify, match, explain, index, and render")
     commands.add_parser("render", help="rebuild the vault pages from the database only")
     serve = commands.add_parser("serve", help="browser dashboard on localhost")
-    serve.add_argument("--port", type=int, default=3457)
+    serve.add_argument("--port", type=int, default=3460)
     commands.add_parser("mcp", help="MCP server (stdio) so agents can search the warehouse: search, get_item, "
                         "project_context, list_projects, skills, suggestions, request")
     skill = commands.add_parser("skills", help="propose, build, test, and publish skills made from item topics")

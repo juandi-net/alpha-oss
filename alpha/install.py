@@ -26,7 +26,7 @@ CONTEXT_FEEDS = {
     "anarlog": [Path.home() / "Library" / "Application Support" / "hyprnote" / "app.db"],
 }
 RUN_INTERVAL_SECONDS = 6 * 3600  # each source keeps its own cadence (`every_hours`); this only wakes the run
-DASHBOARD_PORT = 3457
+DASHBOARD_PORT = 3460
 
 
 def setup() -> None:

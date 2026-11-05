@@ -27,7 +27,7 @@ uv run alpha setup        # checks tools, creates .env and config.toml, says wha
 # fill in .env (keys) and config.toml (projects, sources, context feeds)
 uv run alpha run          # first run: collect, discover, process
 uv run alpha install      # launchd: a run every 6 hours (each source keeps its own cadence) and the dashboard
-open http://localhost:3457
+open http://localhost:3460
 ```
 
 You need an Anthropic API key (`ALPHA_CLAUDE_API_KEY`) and a TypeSafe key (`TYPESAFE_API_KEY`, for Jev). Every
@@ -189,7 +189,7 @@ is checked by the registry; `alpha setup` and `alpha status` report it.
 
 ## Dashboard
 
-`alpha serve` (or the launchd job from `alpha install`) serves http://localhost:3457: the Feed, each item's page and
+`alpha serve` (or the launchd job from `alpha install`) serves http://localhost:3460: the Feed, each item's page and
 skill chat, Projects, Skills, and Requests. The Feed is the stream and little else: each item's title, one line (the
 judge's why for a find, with a "how?" that opens where it came from, both judges' calls, and the bookmarks the judge
 was shown; a find or an idea with a suggestion leads with its headline instead, see Suggestions below), its source,
@@ -397,7 +397,7 @@ uv run alpha run                 # sources on their cadence, open requests, then
 uv run alpha collect [source]    # curated now (x: --limit N, --full-history)
 uv run alpha discover [source]   # discovered now (--max-requests N)
 uv run alpha focus               # rewrite every focus brief now
-uv run alpha process | render | serve [--port 3457]
+uv run alpha process | render | serve [--port 3460]
 uv run alpha mcp                 # MCP server for agents (stdio)
 uv run alpha implement ITEM PROJECT  # carry out a suggestion on a new branch (the dashboard's Implement runs it)
 ```
