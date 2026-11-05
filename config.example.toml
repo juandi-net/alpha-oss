@@ -21,11 +21,10 @@ topic_threshold = 0.7
 # Daily copy of the database and saved images (14 days kept). Optional.
 # backup_directory = "~/Backups/alpha"
 
-# Let There (its own tool, github.com/juandi-net/letthere): on the Feed, point at something, press ],
-# and say what should change. Alpha files the note as a kept idea for the app's project and, with
-# let_there_implement, starts building it at once. Optional: unset let_there_url turns it off.
+# Let There (its own tool, github.com/juandi-net/letthere): on the Feed, point at something, press ], and say what
+# should change; Let There builds it where the app lives, and Alpha files the note as a kept idea for the app's
+# project and learns from the build. Optional: unset turns the overlay off.
 # let_there_url = "http://localhost:3470"
-# let_there_implement = true
 
 # A family name (sonnet, opus, haiku) uses the newest model of that family; a full id pins one.
 # claude_model: image text, reasons, focus briefs, and the agent in each skill's test run.

@@ -2029,6 +2029,12 @@ def ideas_page(settings: Settings, seen: str) -> str:
     implementing or waiting its turn, branches to review, the ideas you kept (yours and Alpha's rated α) that are
     not started, and what is done. Every entry is the suggestion itself, with α / β, Implement, Review, and Ask
     about this in place. Your own ideas carry the Your idea chip."""
+    if settings.let_there_url:  # Let There's builds end on its side; the page shows them as they stand now
+        writable = connect(settings.database_path)
+        try:
+            letthere.sync(writable, settings)
+        finally:
+            writable.close()
     connection = _connect(settings)
     try:
         shaping = connection.execute(
@@ -3052,8 +3058,8 @@ class _Handler(BaseHTTPRequestHandler):
         self._send(303, location=f"{back.path}{'?' + urlencode(kept) if kept else ''}#{anchor}")
 
     def _letthere_action(self, body: bytes) -> None:
-        """A note Let There just saved (its --notify): file it as a kept idea for its app's project and start
-        Implement (letthere.py), then take any other note still new. Answers JSON; nothing waits on the agent."""
+        """A note Let There just saved (its --notify): file it as a kept idea for its app's project and mirror its
+        build (letthere.py), then do the same for every other note on the server. Answers JSON."""
         settings = load_settings()
         try:
             note = json.loads(body) if body else {}

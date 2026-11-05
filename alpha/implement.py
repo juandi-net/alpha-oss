@@ -28,7 +28,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from . import focus, letthere, omp_agent, own_idea, suggestion_chat, writer
+from . import focus, omp_agent, own_idea, suggestion_chat, writer
 from .config import TOOL_ROOT, Settings, load_settings
 from .projects import _local_file, _repository_spec
 from .skills import slug
@@ -258,15 +258,7 @@ def questions(connection: sqlite3.Connection, item_id: str, project: str) -> str
 
 def own_idea_of(connection: sqlite3.Connection, suggestion: sqlite3.Row) -> str:
     """The user's own words when they wrote the suggestion themselves (own_idea.py, with the chat that shaped it
-    while it is still there) or said it on the app itself (letthere.py), as a section of the agent's prompt; ''
-    for one Alpha wrote."""
-    if suggestion["basis_kind"] == "note":
-        media = str(TOOL_ROOT / "var" / "media")
-        return ("\n# The user's note, made on the app itself (Let There)\nThe user pointed at an element of the "
-                "running app and said what should change; the how above is only that, restated. Their words, which "
-                f"take precedence:\n\n{suggestion['basis']}\n\nThe source item below says which element (its CSS "
-                "path, page, text, and HTML excerpt) and names a picture of it under "
-                f"{media}: read the picture first, so you change what they pointed at and nothing else.\n")
+    while it is still there), as a section of the agent's prompt; '' for one Alpha wrote."""
     if suggestion["basis_kind"] != "user":
         return ""
     section = ("\n# The user's own idea\nThe user wrote this suggestion themselves; the how above is Alpha's write-up "
@@ -314,16 +306,19 @@ def repository_of(worktree: Path) -> Path | None:
 
 
 def _remove_worktree(settings: Settings, suggestion: sqlite3.Row) -> None:
-    """Delete a run's worktree and branch (Alpha's own: under var/worktrees, named alpha/...), from the repository
-    they belong to."""
+    """Delete a run's worktree and branch, from the repository they belong to: Alpha's own (under var/worktrees,
+    named alpha/...), or a Let There build's (named letthere/..., in Let There's worktrees folder)."""
     folder = Path(suggestion["implement_path"]) if suggestion["implement_path"] else None
-    if folder is None or not folder.is_relative_to(WORKTREES):
+    branch = suggestion["implement_branch"] or ""
+    ours = folder is not None and folder.is_relative_to(WORKTREES)
+    theirs = folder is not None and branch.startswith("letthere/") and folder.parent.name == "worktrees"
+    if not (ours or theirs):
         return
     repo = repository_of(folder) or repository(settings, suggestion["project"])
     if repo:
         _git(repo, "worktree", "remove", "--force", str(folder), check=False)
-        if (suggestion["implement_branch"] or "").startswith("alpha/"):
-            _git(repo, "branch", "-D", suggestion["implement_branch"], check=False)
+        if branch.startswith(("alpha/", "letthere/")):
+            _git(repo, "branch", "-D", branch, check=False)
         _git(repo, "worktree", "prune", check=False)
     shutil.rmtree(folder, ignore_errors=True)
 
@@ -401,7 +396,6 @@ def run(connection: sqlite3.Connection, settings: Settings, item_id: str, projec
                 raise Failure(f"The agent did not finish within {settings.implement_minutes} minutes and had changed "
                               "nothing yet.")
             _set(connection, item_id, project, status="implemented", files=files, finished_at=now())
-            letthere.set_status(settings, item_id, "implemented")
             print(f"Implement: {'stopped at the time limit' if cut_short else 'done'}, {files} file"
                   f"{'' if files == 1 else 's'} changed on {chosen.branch}", flush=True)
         except Exception as error:  # a crashed run must not stay "implementing"
@@ -409,5 +403,4 @@ def run(connection: sqlite3.Connection, settings: Settings, item_id: str, projec
             if not isinstance(error, Failure):
                 print(traceback.format_exc(), flush=True)
             _set(connection, item_id, project, status="failed", error=reason[:4000], finished_at=now())
-            letthere.set_status(settings, item_id, "failed")
             print(f"Implement: failed: {reason}", flush=True)

@@ -289,18 +289,23 @@ repository or a vault note only) gets a ready-to-run task file instead, `var/han
 suggestion, the item's text, the first step, and acceptance checks); nothing runs.
 
 **Let There.** A layer over the apps you build, its own tool ([juandi-net/letthere](https://github.com/juandi-net/letthere));
-Alpha's Feed is its first app and Alpha is its coordinator. Moving the pointer shows nothing; press `]` (a normal
-`]` while you type in a field) and the element under the pointer at that moment is framed, and a glass box opens
-beside it with the cursor inside, so a dictation app such as Superwhisper types straight into it. ↑ widens the frame to the
-surrounding element (↓ narrows it back), Enter saves, Esc closes. Let There keeps the note as a markdown file with
-a picture of the element and tells Alpha (`letthere.py`); Alpha files it as a kept idea for the app's project (the
-script tag's `data-app`, matched to a project name; the same card as a Your idea, marked Let There, with the
-element's picture, text, and HTML attached to its item) and, with `let_there_implement = true` (the default),
-starts Implement on it at once, so saying the change is all there is to it. The note's status line follows the
-work: taken, implementing, implemented or failed, done. Setup: run Let There's server with
-`python3 server.py --install --notify http://localhost:3460/letthere` and set `let_there_url = "http://localhost:3470"`
-in config.toml; Alpha then adds the one script tag to the Feed, and `alpha run` also asks for notes still new, so
-none is missed while the dashboard is down. Notes made on an app that is not one of your projects stay new.
+Alpha's Feed is its first app. Moving the pointer shows nothing; press `]` (a normal `]` while you type in a field)
+and the element under the pointer at that moment is framed, and a glass box opens beside it with the cursor
+inside, so a dictation app such as Superwhisper types straight into it. ↑ widens the frame to the surrounding
+element (↓ narrows it back), Enter saves, Esc closes. Let There keeps the note as a markdown file with a picture of
+the element and, by itself, builds it into a branch of the app's repository (its `--build`, with the app's
+repository from its `apps.toml`): saying the change is all there is to it. Alpha is told about each note
+(`--notify`) and learns from it (`letthere.py`): the note becomes a kept idea for the app's project (the script
+tag's `data-app`, matched to a project name; the same card as a Your idea, marked Let There, with the element's
+picture, text, and HTML attached to its item), and Let There's build is mirrored onto it as it goes (implementing,
+then the branch, files, and the agent's report under Review changes, or the failure), so the Ideas tab, Review,
+Remove, Ask about this, and Mark done (which sets the note to done) all apply, and the note and its build feed
+the focus brief, the taste profile, and the context new suggestions are written from. Alpha never builds a note
+itself; its own Implement stays for Alpha's suggestions. Setup: in Let There's folder,
+`python3 server.py --install --build --notify http://localhost:3460/letthere` with the app's repository in
+`apps.toml` (`alpha = "/path/to/alpha"`), and `let_there_url = "http://localhost:3470"` in config.toml; Alpha then
+adds the one script tag to the Feed, and `alpha run` and the Ideas tab ask Let There for every note, so a build that
+ended while the dashboard was down shows too. Notes made on an app that is not one of your projects are Let There's alone.
 
 ## Agents (MCP)
 
