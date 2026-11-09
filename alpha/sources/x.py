@@ -95,7 +95,7 @@ class Throttled(Exception):
 # One X session per run, shared by everything that reads X (bookmarks, post pages, timelines): opened on first
 # use by page(), closed by close() at the end of the run. The first non-200 sets _stopped, and every later read
 # in the run raises Throttled at once.
-_shared: tuple[ExitStack, "_XPage"] | None = None
+_shared: tuple[ExitStack, _XPage] | None = None
 _stopped: str | None = None
 # Why X itself stopped this run's reads (a refusal or a page that would not load), as against the browser failing;
 # and whether any X read answered 200 with data. record_status() saves both.
@@ -367,9 +367,8 @@ def _bookmark_tweets(body: dict) -> list[dict]:
 def _results(value) -> Iterator[dict]:
     """Every post result in a GraphQL body, in document order, wherever the timeline nests it."""
     if isinstance(value, dict):
-        if "tweet_results" in value:
-            if tweet := _tweet(value["tweet_results"].get("result")):
-                yield tweet
+        if "tweet_results" in value and (tweet := _tweet(value["tweet_results"].get("result"))):
+            yield tweet
         for key, child in value.items():
             if key != "tweet_results":
                 yield from _results(child)
@@ -553,8 +552,7 @@ def fetch_timelines(*, following_scrolls: int, for_you_scrolls: int,
         return reached, counts
 
     xpage = page()
-    for operation in TIMELINES:  # Following first: it stops at posts seen in an earlier run
-        tab, label = TIMELINES[operation]
+    for operation, (tab, label) in TIMELINES.items():  # Following first: it stops at posts seen in an earlier run
         cap = following_scrolls if tab == "following" else for_you_scrolls
         scrolls = stale = 0
         per_batch: list[int] = []

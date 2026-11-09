@@ -72,7 +72,7 @@ def set_status(settings: Settings, item_id: str, status: str) -> None:
 
 def _project_for(connection: sqlite3.Connection, app: str) -> str | None:
     """The project the app's name means: one with a spec or a focus brief (own_idea.projects), spelled loosely."""
-    normal = lambda name: re.sub(r"[^a-z0-9]", "", name.lower())  # noqa: E731
+    normal = lambda name: re.sub(r"[^a-z0-9]", "", name.lower())
     return next((name for name in project_texts(connection) if normal(name) == normal(app)), None)
 
 

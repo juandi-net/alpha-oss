@@ -102,7 +102,7 @@ def following(hub: huggingface.Client, user: str) -> list[str]:
 
 
 def _time(value: str | None) -> datetime | None:
-    return datetime.fromisoformat(value.replace("Z", "+00:00")) if value else None
+    return datetime.fromisoformat(value) if value else None
 
 
 def changed_since(hub: huggingface.Client, account: str, kind: str, since: datetime, limit: int) -> tuple[list[dict], bool]:

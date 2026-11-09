@@ -2,9 +2,11 @@
 on a new branch in a separate worktree, and reports; Alpha then commits the change on that branch itself.
 
 The user's working folder is never touched: the branch alpha/<slug> starts from the repository's current HEAD
-(uncommitted changes there are not included) in var/worktrees/<project>-<slug>. The agent is an omp session with
-`agent_model`, so it has the user's MCP servers (Alpha's own search, Interface Lineage, browsers, ...) and skills;
-it is told to read, edit files in the worktree, and run the project's tests, checks, and dependency installs, and
+(uncommitted changes there are not included) in var/worktrees/<project>-<slug>. The agent is an omp session, so it
+has the user's MCP servers (Alpha's own search, Interface Lineage, browsers, ...) and skills; its model is the router's
+pick (route: Jev sizes the change small, medium, or large, and `implement_models` names each size's model, Sonnet for
+a sure small one and `agent_model` otherwise); the readback shows the pick and Confirm runs with it. The agent
+is told to read, edit files in the worktree, and run the project's tests, checks, and dependency installs, and
 not to commit, push, deploy, send, or buy (omp has no hard deny-list for commands: the rules, the worktree, and the
 time limit are the guard). Alpha commits as the user (their git identity and hooks, no trailers) with
 "Alpha: <headline>"; nothing is pushed, deployed, published, sent, or bought by Alpha.
@@ -19,6 +21,7 @@ One implementation at a time: each waits for var/implement.lock (the Mac is shor
 """
 
 import fcntl
+import json
 import re
 import shutil
 import sqlite3
@@ -28,8 +31,11 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+from typesafe_sdk import TypeSafeError
+
 from . import focus, omp_agent, own_idea, suggestion_chat, writer
 from .config import TOOL_ROOT, Settings, load_settings
+from .jev import ChangeSize, Jev
 from .projects import _local_file, _repository_spec
 from .skills import slug
 from .storage import content_of, now
@@ -50,6 +56,13 @@ CHECK_COMMANDS = (
     "uv run pytest", "uv run ruff", "uv sync", "pytest", "npm test", "npm run lint", "npm install", "npx tsc",
     "bun test", "bun install", "cargo test", "cargo check", "go test", "make test",
 )
+# The router (route), as Let There's: the cheaper the model, the surer Jev must be of that size to take it; below the
+# bar the change goes one size up. Large needs no bar: the strongest model is never the wrong call, only the slow one.
+SIZES = ("small", "medium", "large")
+SURE = {"small": 0.75, "medium": 0.55}
+LOGIC = 0.7    # Jev's odds that it changes how something works, above which a small change counts as medium
+DESIGN = 0.7   # its odds that the design is left open, likewise
+ROUTE_CHARACTERS = 6000
 AGENT_PROMPT = """You are carrying out one suggestion in the user's project {project}. You are in a git worktree of \
 its repository, on the new branch {branch}; the user's own working folder is elsewhere and stays untouched.
 
@@ -146,7 +159,7 @@ class Plan:
 def _git(folder: Path, *arguments: str, check: bool = True) -> subprocess.CompletedProcess:
     """git in `folder` with the user's own environment: their identity, config, and hooks."""
     completed = subprocess.run(["git", "-C", str(folder), *arguments], capture_output=True, text=True,
-                               stdin=subprocess.DEVNULL)
+                               stdin=subprocess.DEVNULL, check=False)
     if check and completed.returncode != 0:
         raise Failure(f"git {' '.join(arguments[:2])} failed: {(completed.stderr or completed.stdout).strip()[-600:]}")
     return completed
@@ -278,7 +291,61 @@ def _set(connection: sqlite3.Connection, item_id: str, project: str, **values) -
 
 def _clear(connection: sqlite3.Connection, item_id: str, project: str, status: str | None) -> None:
     _set(connection, item_id, project, status=status, branch=None, base=None, path=None, report=None, error=None,
-         files=None, started_at=now() if status else None, finished_at=None)
+         files=None, model=None, route=None, started_at=now() if status else None, finished_at=None)
+
+
+def decide(size: ChangeSize) -> tuple[str, dict]:
+    """(size, why) from Jev's answers: its likeliest size, raised one step when it is not sure enough of a cheap one,
+    and raised from small to medium when the change likely alters behavior or leaves design open."""
+    level = max(range(len(SIZES)), key=lambda index: size.probabilities[index])
+    why = {"size": SIZES[level], "size_probability": round(size.probabilities[level], 2),
+           "logic": round(size.logic, 2), "design": round(size.design, 2)}
+    chosen = level
+    if level < 2 and size.probabilities[level] < SURE[SIZES[level]]:
+        chosen = level + 1
+        why["raised"] = f"not sure enough it is {SIZES[level]} ({size.probabilities[level]:.2f} < {SURE[SIZES[level]]})"
+    if chosen < 1 and size.logic > LOGIC:
+        chosen = 1
+        why["raised"] = f"it changes how something works ({size.logic:.2f})"
+    if chosen < 1 and size.design > DESIGN:
+        chosen = 1
+        why["raised"] = f"it leaves design choices open ({size.design:.2f})"
+    return SIZES[chosen], why
+
+
+def route(connection: sqlite3.Connection, settings: Settings, plan: Plan) -> tuple[str, dict]:
+    """(the model Implement's agent runs with, how it was chosen): Jev sizes the change from the suggestion, the
+    user's own idea, and their questions about it, and `implement_models` names the size's model. One model for
+    every size asks Jev nothing; without an answer from Jev the large size's model runs."""
+    models = settings.implement_models
+    if len(set(models.values())) == 1:
+        return models["large"], {"router": "pinned", "chosen": "large"}
+    suggestion = plan.suggestion
+    state = (f"A change a coding agent is about to make in the repository of the project {suggestion['project']}.\n\n"
+             f"Change: {plan.headline}\nHow: {suggestion['action']}\n"
+             f"Outcome the user expects: {suggestion['outcome'] or '(not written)'}\n"
+             f"{own_idea_of(connection, suggestion)}{questions(connection, suggestion['item_id'], suggestion['project'])}")
+    try:
+        size = Jev(settings.jev_model).change_size(state[:ROUTE_CHARACTERS])
+    except (TypeSafeError, OSError) as error:
+        return models["large"], {"router": "none", "chosen": "large", "error": f"{type(error).__name__}: {error}"[:300]}
+    chosen, why = decide(size)
+    return models[chosen], {"router": "jev", "chosen": chosen, **why}
+
+
+def route_summary(model: str | None, route_json: str | dict | None) -> str:
+    """The model and why, in words (plain text), for the readback, the review, and MCP."""
+    if not model:
+        return ""
+    why = json.loads(route_json) if isinstance(route_json, str) else (route_json or {})
+    if why.get("router") == "pinned":
+        return f"{model} (implement_models names one model for every size)"
+    if why.get("router") != "jev":
+        return f"{model}, the large size's model (Jev did not answer: {why.get('error', 'no reason')})"
+    sized = (f"Jev sized the change {why['size']} ({why['size_probability']:.2f} sure; changes behavior "
+             f"{why['logic']:.2f}, design open {why['design']:.2f})")
+    raised = f"; raised to {why['chosen']}: {why['raised']}" if why.get("raised") else ""
+    return f"{model}, the {why['chosen']} size's model: {sized}{raised}"
 
 
 def handoff(connection: sqlite3.Connection, plan: Plan) -> Path:
@@ -291,10 +358,12 @@ def handoff(connection: sqlite3.Connection, plan: Plan) -> Path:
     return plan.handoff
 
 
-def queue(connection: sqlite3.Connection, item_id: str, project: str) -> None:
-    """Marked before the background run starts, so the dashboard shows it at once. An earlier run's branch and
-    worktree stay recorded, so the run can delete them before it starts again."""
-    _set(connection, item_id, project, status="queued", error=None, started_at=now(), finished_at=None)
+def queue(connection: sqlite3.Connection, item_id: str, project: str, model: str, why: dict) -> None:
+    """Marked before the background run starts, so the dashboard shows it at once, with the model the readback showed
+    (the run uses it). An earlier run's branch and worktree stay recorded, so the run can delete them before it
+    starts again."""
+    _set(connection, item_id, project, status="queued", error=None, model=model, route=json.dumps(why),
+         started_at=now(), finished_at=None)
 
 
 def repository_of(worktree: Path) -> Path | None:
@@ -370,7 +439,8 @@ def _commit(folder: Path, base: str, headline: str, item: sqlite3.Row) -> int:
 
 
 def run(connection: sqlite3.Connection, settings: Settings, item_id: str, project: str) -> None:
-    """Carry out the suggestion (the `implement` command, started by the dashboard's Confirm)."""
+    """Carry out the suggestion (the `implement` command, started by the dashboard's Confirm) with the model the
+    readback showed (queued with it), or, run by hand, the router's pick now."""
     LOCK.parent.mkdir(parents=True, exist_ok=True)
     with LOCK.open("w") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX)  # one at a time: a second run waits here, shown as queued
@@ -378,6 +448,8 @@ def run(connection: sqlite3.Connection, settings: Settings, item_id: str, projec
         if suggestion is None:
             raise SystemExit(f"Implement: no suggestion for {item_id} in {project}")
         _remove_worktree(settings, suggestion)  # an earlier failed run's worktree and branch
+        queued = suggestion["implement_status"] == "queued" and suggestion["implement_model"]
+        routed = (suggestion["implement_model"], json.loads(suggestion["implement_route"] or "{}")) if queued else None
         _clear(connection, item_id, project, "implementing")
         try:
             chosen = plan(connection, settings, item_id, project)
@@ -387,9 +459,12 @@ def run(connection: sqlite3.Connection, settings: Settings, item_id: str, projec
             WORKTREES.mkdir(parents=True, exist_ok=True)
             _git(chosen.repository, "worktree", "add", "-q", "-b", chosen.branch, str(chosen.worktree), base)
             _set(connection, item_id, project, branch=chosen.branch, base=base, path=str(chosen.worktree))
-            print(f"Implement: {project}: {chosen.headline} on {chosen.branch} in {chosen.worktree}", flush=True)
+            model, why = routed or route(connection, settings, chosen)
+            _set(connection, item_id, project, model=model, route=json.dumps(why))
+            print(f"Implement: {project}: {chosen.headline} on {chosen.branch} in {chosen.worktree}, with "
+                  f"{route_summary(model, why)}", flush=True)
             prompt = AGENT_PROMPT.format(**_context(connection, chosen))
-            report, cut_short = _agent(chosen.worktree, prompt, settings.agent_model, settings.implement_minutes)
+            report, cut_short = _agent(chosen.worktree, prompt, model, settings.implement_minutes)
             _set(connection, item_id, project, report=report)
             files = _commit(chosen.worktree, base, chosen.headline, chosen.item)
             if cut_short and not files:
@@ -398,7 +473,7 @@ def run(connection: sqlite3.Connection, settings: Settings, item_id: str, projec
             _set(connection, item_id, project, status="implemented", files=files, finished_at=now())
             print(f"Implement: {'stopped at the time limit' if cut_short else 'done'}, {files} file"
                   f"{'' if files == 1 else 's'} changed on {chosen.branch}", flush=True)
-        except Exception as error:  # a crashed run must not stay "implementing"
+        except Exception as error:  # a crashed run must not stay "implementing"  # noqa: BLE001
             reason = str(error) if isinstance(error, Failure) else f"{type(error).__name__}: {error}"
             if not isinstance(error, Failure):
                 print(traceback.format_exc(), flush=True)

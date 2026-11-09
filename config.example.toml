@@ -37,6 +37,11 @@ skill_model = "opus"
 # agent_model: the omp agents, the Have an idea chat and Implement. A family name is resolved through
 # `omp-latest-model` when it is installed (omp's own match may pick an older release of the family).
 agent_model = "opus"
+# implement_models: Implement's router. Jev sizes each change (small: copy, one value, one style; medium: a
+# contained change to how one part works; large: a feature or an open design) and its size's model runs. Doubt goes
+# up a size, and a small change that alters behavior or leaves design open counts as medium. Unset: Sonnet for small,
+# agent_model for the rest. Name one model for every size to skip the router.
+# implement_models = { small = "sonnet", medium = "opus", large = "opus" }
 # implement_minutes: how long Implement's agent may work on a suggestion before it is stopped (its unfinished changes
 # stay uncommitted in the worktree). A large change needs well over 30.
 implement_minutes = 120

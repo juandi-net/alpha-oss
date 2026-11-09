@@ -282,6 +282,8 @@ CREATE TABLE IF NOT EXISTS suggestions (
     implement_report TEXT,           -- the agent's report: what it changed, why, how it checked it, what's left
     implement_error TEXT,            -- failed: why
     implement_files INTEGER,         -- files the commit changed (0: nothing changed, no commit)
+    implement_model TEXT,            -- the model the agent ran with (implement.route)
+    implement_route TEXT,            -- JSON: how it was chosen (Jev's size, behavior and design odds, any escalation)
     implement_started_at TEXT,
     implement_finished_at TEXT,
     PRIMARY KEY (item_id, project)
@@ -395,7 +397,7 @@ ADDED_COLUMNS = {
                         ("implement_status", "TEXT"), ("implement_branch", "TEXT"), ("implement_base", "TEXT"),
                         ("implement_path", "TEXT"), ("implement_report", "TEXT"), ("implement_error", "TEXT"),
                         ("implement_files", "INTEGER"), ("implement_started_at", "TEXT"),
-                        ("implement_finished_at", "TEXT"))}},
+                        ("implement_finished_at", "TEXT"), ("implement_model", "TEXT"), ("implement_route", "TEXT"))}},
 }
 
 

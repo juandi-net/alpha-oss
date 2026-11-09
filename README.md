@@ -281,8 +281,14 @@ your decisions and constraints in it take precedence over the suggestion. Agents
 `suggestions`: the number of questions and the last answer).
 
 **Implement.** Implement on a suggestion first reads back what it will do: the suggestion and its item, the
-repository folder, the new branch `alpha/<slug>`, the model (`agent_model`; a family name such as `opus` is
-resolved to its newest release through `omp-latest-model` when that helper is installed), the time, and the guarantees. On
+repository folder, the new branch `alpha/<slug>`, the model and why, the time, and the guarantees. The model is the
+router's pick (`implement.route`): Jev sizes the change in one request of about 50 ms (small: copy, one value, one
+style; medium: a contained change to how one part works; large: a feature or an open design), and `implement_models`
+names each size's model, by default Sonnet for small and `agent_model` (Opus) otherwise. Like Let There's router it
+escalates on doubt: a size Jev is not sure enough of goes up one, and a small change that alters behavior or leaves
+design open counts as medium; without an answer from Jev the large size's model runs. A family name such as `opus`
+is resolved to its newest release through `omp-latest-model` when that helper is installed. Confirm runs with the
+model the readback showed, and the review page and MCP say which model ran and why. On
 Confirm, `alpha implement` (`implement.py`) makes a git worktree of the project's local repository (its
 `[project_repositories]` folder, or a repository with its name under `[context] projects_directory`) on that branch
 from its current HEAD, in `var/worktrees/<project>-<slug>`, so your own working folder is never touched. A headless

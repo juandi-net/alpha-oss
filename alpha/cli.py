@@ -73,7 +73,7 @@ def _collect(settings: Settings, connection, source: ModuleType) -> None:
         if hasattr(source, "enrich") and not stats.get("stopped"):
             source.enrich(connection, settings)
         result = ", ".join(f"{key} {value}" for key, value in stats.items())
-    except (Exception, SystemExit) as error:  # the other sources and processing still run
+    except (Exception, SystemExit) as error:  # the other sources and processing still run  # noqa: BLE001
         result = f"failed: {error}" if isinstance(error, SystemExit) else f"failed: {type(error).__name__}: {error}"
         print(f"{source.NAME}: {result}")
     finally:
@@ -111,7 +111,7 @@ def _discover(settings: Settings, connection, chosen: list[ModuleType], cadence:
         started, result = now(), "failed"
         try:
             result = judge.run(connection, settings, jev, source, wanted)
-        except Exception as error:  # discovery is extra; collected items are still processed
+        except Exception as error:  # discovery is extra; collected items are still processed  # noqa: BLE001
             result = f"failed: {type(error).__name__}: {error}"
             print(f"{source.NAME}: {result}")
         finally:

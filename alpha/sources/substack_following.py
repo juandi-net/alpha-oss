@@ -110,7 +110,7 @@ def _seen(connection: sqlite3.Connection, url: str) -> bool:
 
 def _posted(post: dict) -> datetime | None:
     value = post.get("post_date")
-    return datetime.fromisoformat(value.replace("Z", "+00:00")) if value else None
+    return datetime.fromisoformat(value) if value else None
 
 
 def discover(connection: sqlite3.Connection, settings: Settings, needs: list[Need]) -> list[Candidate]:

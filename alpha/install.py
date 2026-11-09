@@ -108,7 +108,7 @@ def _plists() -> dict[str, dict]:
 
 
 def _launchctl(*arguments: str) -> subprocess.CompletedProcess:
-    return subprocess.run(["launchctl", *arguments], capture_output=True, text=True)
+    return subprocess.run(["launchctl", *arguments], capture_output=True, text=True, check=False)
 
 
 def start_detached(command: str, *arguments: str) -> None:

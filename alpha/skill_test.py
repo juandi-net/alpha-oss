@@ -67,7 +67,7 @@ def run_scripts(directory: Path, spec: SkillSpec, target: str) -> list[dict]:
         try:
             completed = subprocess.run(
                 shlex.split(command), cwd=directory, capture_output=True, text=True,
-                timeout=SCRIPT_TIMEOUT_SECONDS, env=environment(), stdin=subprocess.DEVNULL,
+                timeout=SCRIPT_TIMEOUT_SECONDS, env=environment(), stdin=subprocess.DEVNULL, check=False,
             )
             code, stdout, stderr = completed.returncode, completed.stdout, completed.stderr
         except subprocess.TimeoutExpired as error:
@@ -100,7 +100,7 @@ def run_agent(directory: Path, target: str, model: str) -> str:
     try:
         completed = subprocess.run(
             command, cwd=workspace, capture_output=True, text=True, timeout=AGENT_TIMEOUT_SECONDS,
-            env=environment(), stdin=subprocess.DEVNULL,
+            env=environment(), stdin=subprocess.DEVNULL, check=False,
         )
         printed = completed.stdout
     except subprocess.TimeoutExpired:

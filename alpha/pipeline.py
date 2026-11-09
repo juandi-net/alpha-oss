@@ -29,7 +29,7 @@ def parallel(items: list, task: Callable, store: Callable, label: str) -> None:
             item = futures[future]
             try:
                 store(item, future.result())
-            except Exception as error:  # reported and left unfinished; the next run retries it
+            except Exception as error:  # reported and left unfinished; the next run retries it  # noqa: BLE001
                 failures += 1
                 print(f"{label}: failed: {type(error).__name__}: {error}")
     print(f"{label}: {len(items) - failures} done, {failures} failed")

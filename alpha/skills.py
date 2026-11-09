@@ -501,7 +501,7 @@ def build(connection: sqlite3.Connection, settings: Settings, name: str, retry_o
             (status, json.dumps(result["members"]), result["spec"].model_dump_json(), result["skill_md"],
              json.dumps(checks), result.get("report"), name, version),
         )
-    except Exception as error:  # a crashed build must not stay "building" or stop the scheduled run
+    except Exception as error:  # a crashed build must not stay "building" or stop the scheduled run  # noqa: BLE001
         attempts.append({"error": f"{type(error).__name__}: {error}", "trace": traceback.format_exc()[-3000:]})
         connection.execute(
             "UPDATE skill_versions SET status = 'failed', checks = ? WHERE topic = ? AND version = ?",

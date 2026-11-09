@@ -54,6 +54,7 @@ def _github_file(repository: str) -> Callable[[str], str | None]:
             ["gh", "api", f"repos/{repository}/contents/{filename}", "-H", "Accept: application/vnd.github.raw"],
             capture_output=True,
             text=True,
+            check=False,
         )
         if result.returncode == 0:
             return result.stdout

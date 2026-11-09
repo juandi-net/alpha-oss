@@ -64,7 +64,7 @@ def _token() -> str | None:
     if token := os.environ.get("GITHUB_TOKEN"):
         return token
     if shutil.which("gh"):
-        result = subprocess.run(["gh", "auth", "token"], capture_output=True, text=True, timeout=30)
+        result = subprocess.run(["gh", "auth", "token"], capture_output=True, text=True, timeout=30, check=False)
         if result.returncode == 0 and result.stdout.strip():
             return result.stdout.strip()
     return None
@@ -191,7 +191,7 @@ def fetch_stars(connection: sqlite3.Connection, github: _GitHub) -> tuple[int, i
 
 def _clean(readme: str) -> str:
     """Markdown without HTML, images, and badge clutter."""
-    text = re.sub(r"<!--.*?-->", "", readme, flags=re.S)
+    text = re.sub(r"<!--.*?-->", "", readme, flags=re.DOTALL)
     text = re.sub(r"\[!\[[^\]]*\]\([^)]*\)\]\([^)]*\)", "", text)  # linked badges
     text = re.sub(r"!\[[^\]]*\]\([^)]*\)", "", text)               # images
     text = re.sub(r"<[^>]+>", "", text)

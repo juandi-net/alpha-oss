@@ -53,7 +53,7 @@ def resolve_model(omp: str, model: str) -> str:
     tool = shutil.which("omp-latest-model", path=_environment(omp)["PATH"])
     if not tool:
         return model
-    found = subprocess.run([tool, model], capture_output=True, text=True, env=_environment(omp))
+    found = subprocess.run([tool, model], capture_output=True, text=True, env=_environment(omp), check=False)
     return found.stdout.strip() if found.returncode == 0 and found.stdout.strip() else model
 
 

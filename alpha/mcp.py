@@ -37,7 +37,7 @@ ITEM_CHARACTERS = 40_000
 # Words that say what the agent wants rather than what it wants it about ("check Alpha for tips on local SEO").
 FILLER = set("""a an the of for to in on and or with about how what which who is are was do does did i my me we us our
 you your it its this that these those from by at as be can could should would any some anything something there
-alpha check find look show me tips ideas idea posts post bookmarks items stuff things related regarding""".split())
+alpha check find look show tips ideas idea posts post bookmarks items stuff things related regarding""".split())
 CONTENT_LABELS = {"thread": "Thread (the author's follow-up posts)", "author_replies": "Author replies",
                   "quoted": "Quoted post", "replied_to": "Replied to", "article": "Article", "image": "Image text",
                   "link": "Linked page"}
@@ -315,9 +315,7 @@ def _specificity(sentence: str) -> int:
     for index, token in enumerate(re.findall(r"[\w.%$+-]+", sentence)):
         if any(character.isdigit() for character in token):
             score += 2
-        elif index and (token[0].isupper() or any(character.isupper() for character in token[1:])):
-            score += 1
-        elif token.lower() in STEP_WORDS:
+        elif index and (token[0].isupper() or any(character.isupper() for character in token[1:])) or token.lower() in STEP_WORDS:
             score += 1
     return score
 
@@ -470,8 +468,8 @@ def get_item(id: str) -> str:
             asked = f"request {judged['request_id']}" if judged["request_id"] else f"query '{judged['query']}'"
             sauce = f", Jev sauce {judged['jev_sauce']:.2f}" if judged["jev_sauce"] is not None else ""
             novelty = f", novelty {judged['novelty']:.2f}" if judged["novelty"] is not None else ""
-            lines += ["", f"Judge (found for {judged['fit_project'] or 'no project'} by {asked}{sauce}{novelty}): "
-                          f"{judged['why'] or 'no reason recorded'}"]
+            lines += ["", (f"Judge (found for {judged['fit_project'] or 'no project'} by {asked}{sauce}{novelty}): "
+                          f"{judged['why'] or 'no reason recorded'}")]
         used = len("\n".join(lines))
         for row in content:
             if used >= ITEM_CHARACTERS:
@@ -603,7 +601,9 @@ def _implementation(row: sqlite3.Row) -> str:
         "queued": "implementation waiting to start",
         "implementing": f"being implemented on branch {branch}" if branch else "being implemented",
         "implemented": f"implemented on branch {branch} ({row['implement_files'] or 0} files changed, not merged; "
-                       f"worktree {row['implement_path']})",
+                       f"worktree {row['implement_path']}"
+                       + (f"; agent {implement.route_summary(row['implement_model'], row['implement_route'])}"
+                          if row["implement_model"] else "") + ")",
         "failed": f"implementation failed: {reason}",
         "stale": "implementation stopped without finishing",
         "handoff": f"no local repository; task file {row['implement_path']}",

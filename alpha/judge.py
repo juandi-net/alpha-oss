@@ -231,7 +231,7 @@ def stage_two(connection: sqlite3.Connection, settings: Settings, jev: Jev, sour
             text = source.fetch_text(connection, settings, row)
         except Stop as error:
             return judged, finds, str(error)
-        except Exception as error:  # a deleted page or an answer that does not parse: not tried again
+        except Exception as error:  # a deleted page or an answer that does not parse: not tried again  # noqa: BLE001
             connection.execute("UPDATE candidates SET status = 'failed', why = ? WHERE id = ?",
                                (f"{type(error).__name__}: {error}"[:300], row["id"]))
             connection.commit()
@@ -247,7 +247,7 @@ def stage_two(connection: sqlite3.Connection, settings: Settings, jev: Jev, sour
                 brief = f"{brief}\n\n{liked}"
         try:
             verdict = writer.judge_sauce(settings.judge.model, label, brief, state, row["kind"])
-        except Exception as error:  # the Claude endpoint is down or the answer did not parse: judged next run
+        except Exception as error:  # the Claude endpoint is down or the answer did not parse: judged next run  # noqa: BLE001
             print(f"Judge: Claude failed: {type(error).__name__}")
             continue
         others = [candidate for candidate in known if candidate[0] != row["id"]]

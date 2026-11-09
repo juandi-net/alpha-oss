@@ -146,7 +146,7 @@ def agent_prompts(since: datetime) -> list[Item]:
                 # Slash commands, command output, and injected reminders are wrapped in tags, not typed prose.
                 if not isinstance(content, str) or content.lstrip().startswith("<"):
                     continue
-                at = datetime.fromisoformat(entry["timestamp"].replace("Z", "+00:00"))
+                at = datetime.fromisoformat(entry["timestamp"])
                 if at >= since:
                     items.append(Item("agent", at, content, Path(entry["cwd"]) if entry.get("cwd") else None))
     unique: dict[str, Item] = {}
@@ -182,7 +182,7 @@ def commits(repository: Path, since: datetime) -> list[Item]:
     result = subprocess.run(
         ["git", "-C", str(repository), "log", f"--since={since.isoformat()}", "--no-merges",
          "--format=%x1e%aI%x1f%s", "--name-only"],
-        capture_output=True, text=True,
+        capture_output=True, text=True, check=False,
     )
     items = []
     for record in result.stdout.split("\x1e")[1:]:

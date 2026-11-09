@@ -55,6 +55,7 @@ class Settings:
     summary_model: str
     skill_model: str
     agent_model: str
+    implement_models: dict[str, str]  # Implement's router: the model per change size (small, medium, large)
     implement_minutes: int
     jev_model: str
     relevance_threshold: float
@@ -100,6 +101,7 @@ def load_settings(config_path: Path = CONFIG_PATH) -> Settings:
         summary_model=raw.get("summary_model", "opus"),
         skill_model=raw.get("skill_model", "opus"),
         agent_model=raw.get("agent_model", "opus"),
+        implement_models=_implement_models(raw),
         implement_minutes=int(raw.get("implement_minutes", 120)),
         jev_model=raw.get("jev_model", "jev-latest"),
         relevance_threshold=float(raw.get("relevance_threshold", 1.5)),
@@ -115,6 +117,17 @@ def load_settings(config_path: Path = CONFIG_PATH) -> Settings:
         sources={name: dict(table) for name, table in raw.get("sources", {}).items()},
         let_there_url=str(raw.get("let_there_url", "")).strip().rstrip("/"),
     )
+
+
+def _implement_models(raw: dict) -> dict[str, str]:
+    """`implement_models`: the model Implement's agent runs with per change size, as Jev sizes it (implement.route).
+    Unset sizes: Sonnet for a small change, agent_model for the rest."""
+    agent = raw.get("agent_model", "opus")
+    values = dict(raw.get("implement_models", {}))
+    unknown = values.keys() - {"small", "medium", "large"}
+    if unknown:
+        raise ValueError(f"config.toml implement_models has unknown sizes: {', '.join(sorted(unknown))}")
+    return {"small": "sonnet", "medium": agent, "large": agent} | {size: str(model) for size, model in values.items()}
 
 
 def _table(kind: type, name: str, values: dict):

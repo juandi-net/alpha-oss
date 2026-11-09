@@ -214,7 +214,8 @@ def _static(name: str) -> str:
 def _running() -> list[str]:
     """The Alpha commands running right now (run, collect, discover, process, focus), from the process list."""
     try:
-        listing = subprocess.run(["pgrep", "-lf", RUN_COMMAND], capture_output=True, text=True, timeout=2).stdout
+        listing = subprocess.run(["pgrep", "-lf", RUN_COMMAND], capture_output=True, text=True, timeout=2,
+                                 check=False).stdout
     except (OSError, subprocess.TimeoutExpired):
         return []
     return sorted({match.group(1) for match in re.finditer(r"alpha (run|collect|discover|process|focus)\b", listing)})
@@ -470,8 +471,8 @@ def _how(row: sqlite3.Row, settings: Settings, titles: dict[str, str], action: s
         came = source
     lines = []
     if action is not None:
-        lines += [("How", f'<a href="/project/{quote(action["project"])}">{escape(action["project"])}</a>: '
-                          f'{escape(action["action"])}'),
+        lines += [("How", (f'<a href="/project/{quote(action["project"])}">{escape(action["project"])}</a>: '
+                          f'{escape(action["action"])}')),
                   ("Judge's why", _verdict_line(row) or "not recorded")]
     lines.append(("Came from", came))
     project = row["found_for"] or ""
@@ -485,8 +486,8 @@ def _how(row: sqlite3.Row, settings: Settings, titles: dict[str, str], action: s
     lines.append(("Claude judge", f"{verdict} ({escape(settings.judge.model)}){paid}"))
     if row["tier"] == "idea" and row["idea_judge"]:
         other = "Claude" if row["idea_judge"] == "jev" else "Jev"
-        lines.append(("Split", f"an idea: {JUDGE_NAMES[row['idea_judge']]} said yes, {other} said no; a find needs "
-                               "both. Rate it α to keep it as a find (then it may feed skills)."))
+        lines.append(("Split", (f"an idea: {JUDGE_NAMES[row['idea_judge']]} said yes, {other} said no; a find needs "
+                               "both. Rate it α to keep it as a find (then it may feed skills).")))
     closest = row["similar_to"] or ""
     if closest.startswith("skill:"):
         closest = f' · closest: the skill <a href="/skills#skill-{quote(closest[6:])}">{escape(closest[6:])}</a>'
@@ -1064,9 +1065,9 @@ def _policy(connection: sqlite3.Connection) -> str:
                                "(SELECT 1 FROM ratings r WHERE r.item_id = i.id AND r.rating = 'beta')").fetchone()[0]
     parts = [
         "Newest first",
-        f'<a href="{escape(_feed_url({"trust": "discovered", "since": today}))}"><b>{found:,}</b> found by Alpha today</a> '
+        (f'<a href="{escape(_feed_url({"trust": "discovered", "since": today}))}"><b>{found:,}</b> found by Alpha today</a> '
         f'out of <a href="/rejected?{escape(urlencode({"since": today}))}" title="What the judge turned down">'
-        f"<b>{read:,}</b> it read</a>",
+        f"<b>{read:,}</b> it read</a>"),
         f'<a href="{escape(_feed_url({"trust": "curated"}))}"><b>{saved:,}</b> saved by you</a>',
     ]
     if ideas:
@@ -1381,7 +1382,7 @@ def _idea_section(connection: sqlite3.Connection, item_id: str, matched: list[st
         anchor = f'/item/{quote(item_id)}#{_ask_anchor(item_id, project)}'
         kept = (f'<p class="note">Now a suggestion for {escape(project)} (<a href="{anchor}">under Fits your '
                 f"projects</a>), updated {_ago(chat['suggested_at'])}; keeping it again replaces it with this plan.</p>")
-    polish = (f'<p class="label">To make more of it</p><ul class="plain">'
+    polish = ('<p class="label">To make more of it</p><ul class="plain">'
               + "".join(f"<li>{escape(line)}</li>" for line in plan.polish) + "</ul>"
               '<p class="note">Take one by saying so below; it folds into the plan.</p>') if plan.polish else ""
     parts.append(
@@ -2494,8 +2495,8 @@ def _build_terms(connection: sqlite3.Connection, settings: Settings, name: str |
     after = (f"tested beside live v{live['version']} on the same task; it must score at least as well, then waits on "
              "the Skills tab for you to publish" if live else "goes live in the skill library if it passes")
     return [
-        ("Model", f"{model} writes the spec; a headless Claude Code agent follows the skill in report-only mode on "
-                  "the test task, and Opus grades the report on six criteria (pass: mean 0.75, none under 0.5)"),
+        ("Model", (f"{model} writes the spec; a headless Claude Code agent follows the skill in report-only mode on "
+                  "the test task, and Opus grades the report on six criteria (pass: mean 0.75, none under 0.5)")),
         ("Then", escape(after)),
         ("Time", "10 to 30 minutes; progress shows on the Skills tab"),
     ]
@@ -2607,8 +2608,8 @@ def request_readback_page(settings: Settings, query: str, project: str, back: st
             ("Searched in", escape(", ".join(_source_label(s.NAME) for s in searchers)) if searchers
              else '<span class="error">no discovered source is enabled and ready</span>'),
             ("When", escape(when)),
-            ("Then", "the judge keeps only what is specific, proven, and usable now; what it keeps shows under the "
-                     "request on the Requests tab"),
+            ("Then", ("the judge keeps only what is specific, proven, and usable now; what it keeps shows under the "
+                     "request on the Requests tab")),
         ]
         warn = (f'<p class="notice">Already asked: request {existing["id"]} is still {escape(existing["status"])}; '
                 "Confirm files nothing new.</p>" if existing else "")
@@ -2633,9 +2634,9 @@ def _suggestion_rows(suggestion: sqlite3.Row, item: sqlite3.Row) -> list[tuple[s
     return [
         ("Suggestion", f"<b>{escape(implement.headline_of(suggestion))}</b>{outcome}"),
         ("How", escape(suggestion["action"])),
-        ("From", f'<a href="/item/{quote(item["id"])}">{escape(_title(item))}</a> '
+        ("From", (f'<a href="/item/{quote(item["id"])}">{escape(_title(item))}</a> '
                  f'<span class="note">{escape(_source_label(item["source"]))} · </span>'
-                 f'<a href="{escape(item["url"])}" target="_blank" rel="noopener">{escape(item["url"])} ↗</a>'),
+                 f'<a href="{escape(item["url"])}" target="_blank" rel="noopener">{escape(item["url"])} ↗</a>')),
         ("Project", f'<a href="/project/{quote(project)}">{escape(project)}</a>'),
     ]
 
@@ -2658,40 +2659,44 @@ def implement_readback_page(settings: Settings, item_id: str, project: str, back
                          + "".join(f'<div class="bubble{" you" if m["role"] == "user" else ""}">{escape(m["content"])}'
                                    "</div>" for m in messages) + "</div></details>"))
         minutes = settings.implement_minutes
+        hidden = {"back": back}
         if chosen.repository:
+            model, why = (implement.route(connection, settings, chosen) if implement.can_start(chosen.suggestion)
+                          else (chosen.suggestion["implement_model"], chosen.suggestion["implement_route"]))
+            hidden["route"] = why if isinstance(why, str) else json.dumps(why)
             busy = [row for row in connection.execute(
                 "SELECT * FROM suggestions WHERE implement_status IN ('queued', 'implementing')")
                 if implement.state(row) in ("queued", "implementing")]
             rows += [
-                ("Works in", f"<code>{escape(str(chosen.repository))}</code>, from its current "
-                             f"<code>{escape(chosen.head)}</code> (uncommitted changes there are not included)"),
-                ("New branch", f"<code>{escape(chosen.branch)}</code>, checked out in its own worktree "
-                               f"<code>{escape(str(chosen.worktree))}</code>, so your working folder is never touched"),
-                ("Agent", f"omp, headless, with <code>{escape(settings.agent_model)}</code> (agent_model; a family name "
-                          "means its newest model), your MCP servers and skills: it reads the project, edits files in "
-                          "the worktree, and runs the project's tests and checks; told not to commit, push, deploy, "
-                          "send, or buy"),
-                ("Then", "Alpha commits the change on the branch itself, as you (your git identity, no trailers): "
+                ("Works in", (f"<code>{escape(str(chosen.repository))}</code>, from its current "
+                             f"<code>{escape(chosen.head)}</code> (uncommitted changes there are not included)")),
+                ("New branch", (f"<code>{escape(chosen.branch)}</code>, checked out in its own worktree "
+                               f"<code>{escape(str(chosen.worktree))}</code>, so your working folder is never touched")),
+                ("Agent", (f"omp, headless, with <b>{escape(implement.route_summary(model, why) or '?')}</b> "
+                          "(implement_models; a family name means its newest model), with your MCP servers and skills: "
+                          "it reads the project, edits files in the worktree, and runs the project's tests and checks; "
+                          "told not to commit, push, deploy, send, or buy")),
+                ("Then", ("Alpha commits the change on the branch itself, as you (your git identity, no trailers): "
                          f"“Alpha: {escape(chosen.headline)}”, with the item's link. The report and the diff wait "
-                         "here under Review changes; merging, deleting, and marking it done stay yours."),
+                         "here under Review changes; merging, deleting, and marking it done stay yours.")),
                 ("Time", f"stopped at {minutes} minutes (implement_minutes); a run stopped there keeps what it did, "
                          "committed as it was, and says so in its report. One implementation runs at a time"
                          + (f" ({len(busy)} running or waiting now, so this one waits its turn)" if busy else "")),
-                ("Guarantees", "<b>Report and change on a new branch only.</b> Nothing is pushed, deployed, published, "
-                               "sent, or bought."),
+                ("Guarantees", ("<b>Report and change on a new branch only.</b> Nothing is pushed, deployed, published, "
+                               "sent, or bought.")),
             ]
-            title, lede, label = (f"Implement in {project}?", "Alpha will carry out this suggestion on a new branch "
-                                  "and report what it did.", "Confirm: implement on a new branch")
+            title, lede, label = (f"Implement in {project}?", ("Alpha will carry out this suggestion on a new branch "
+                                  "and report what it did."), "Confirm: implement on a new branch")
         else:
             source = connection.execute("SELECT source FROM projects WHERE name = ?", (project,)).fetchone()
             where = (f"its spec is {escape(source['source'])}" if source else "it has no spec in Alpha")
             rows += [
-                ("Works in", f'<span class="error">No local repository.</span> {escape(project)} has none in '
+                ("Works in", (f'<span class="error">No local repository.</span> {escape(project)} has none in '
                              f"config.toml or under {escape(str(settings.context.projects_directory or 'projects_directory'))}"
-                             f" ({where}), so nothing runs."),
-                ("Instead", f"Alpha writes a ready-to-run task file, <code>{escape(str(chosen.handoff))}</code>: the "
+                             f" ({where}), so nothing runs.")),
+                ("Instead", (f"Alpha writes a ready-to-run task file, <code>{escape(str(chosen.handoff))}</code>: the "
                             "suggestion, the source item's text, the first step, and how to tell it is done; hand it to "
-                            "an agent where the code lives"),
+                            "an agent where the code lives")),
                 ("Guarantees", "Nothing runs, and nothing is pushed, deployed, published, sent, or bought."),
             ]
             title, lede, label = (f"Write a task for {project}?", "Alpha will write a task file; nothing runs.",
@@ -2701,7 +2706,7 @@ def implement_readback_page(settings: Settings, item_id: str, project: str, back
                 "starts nothing.</p>")
         action = f"/item/{quote(item_id)}/suggestion/{quote(project, safe='')}/implement"
         return _confirm_page(connection, settings, "projects", title, lede, warn + _readback(rows), action,
-                             {"back": back}, label, back, seen)
+                             hidden, label, back, seen)
     finally:
         connection.close()
 
@@ -2716,8 +2721,8 @@ def remove_readback_page(settings: Settings, item_id: str, project: str, back: s
         suggestion, item = found
         worktree = Path(suggestion["implement_path"] or "")
         rows = _suggestion_rows(suggestion, item) + [
-            ("Deletes", f"the branch <code>{escape(suggestion['implement_branch'])}</code> (its commit goes with it "
-                        f"unless you merged it) and the worktree <code>{escape(str(worktree))}</code>"),
+            ("Deletes", (f"the branch <code>{escape(suggestion['implement_branch'])}</code> (its commit goes with it "
+                        f"unless you merged it) and the worktree <code>{escape(str(worktree))}</code>")),
             ("Keeps", "the suggestion, its rating, and your own working folder; Implement can run again"),
         ]
         action = f"/item/{quote(item_id)}/suggestion/{quote(project, safe='')}/remove"
@@ -2767,10 +2772,12 @@ def review_page(settings: Settings, item_id: str, project: str, *, seen: str) ->
         state = {"implemented": f"Implemented {_ago(suggestion['implement_finished_at'])}",
                  "failed": f"Failed: {escape(suggestion['implement_error'] or '')}"}.get(status, escape(status or ""))
         rows = _suggestion_rows(suggestion, item) + [
-            ("Branch", f"<code>{escape(branch)}</code> from <code>{escape((suggestion['implement_base'] or '')[:10])}"
-                       f"</code> · {suggestion['implement_files'] or 0} files changed"),
+            ("Branch", (f"<code>{escape(branch)}</code> from <code>{escape((suggestion['implement_base'] or '')[:10])}"
+                       f"</code> · {suggestion['implement_files'] or 0} files changed")),
             ("Worktree", f'<code class="copyable">{escape(str(worktree))}</code>'),
             ("State", state),
+            ("Agent", escape(implement.route_summary(suggestion["implement_model"], suggestion["implement_route"])
+                             or "not recorded (implemented before the router)")),
         ]
         report = suggestion["implement_report"]
         changes = (f'<pre class="stat">{escape(stat)}</pre>{_diff_html(patch)}' if patch else
@@ -2950,7 +2957,7 @@ class _Handler(BaseHTTPRequestHandler):
                         project = own_idea.keep(connection, settings, item_id)
                         if action == "idea-implement":  # the readback; nothing starts before its Confirm
                             location = f"{base}/suggestion/{quote(project, safe='')}/implement"
-                except Exception as error:  # shown under Have an idea; it can be sent again (a refusal in plain words)
+                except Exception as error:  # shown under Have an idea; it can be sent again (a refusal in plain words)  # noqa: BLE001
                     why = str(error) if isinstance(error, ValueError) else f"{type(error).__name__}: {error}"
                     location = f"{base}?{urlencode({'idea_error': why[:300]})}"
                 if not location.endswith("/implement"):
@@ -2958,7 +2965,7 @@ class _Handler(BaseHTTPRequestHandler):
             else:
                 self._send(404, NOT_FOUND)
                 return
-        except Exception as error:  # shown on the page; the chat can be retried
+        except Exception as error:  # shown on the page; the chat can be retried  # noqa: BLE001
             location = f"{base}?{urlencode({'error': f'{type(error).__name__}: {error}'[:300]})}#skill"
         finally:
             connection.close()
@@ -3089,7 +3096,13 @@ class _Handler(BaseHTTPRequestHandler):
             elif chosen.repository is None:
                 implement.handoff(connection, chosen)
             else:
-                implement.queue(connection, item_id, project)
+                try:
+                    why = json.loads((form.get("route") or ["{}"])[0] or "{}")
+                except ValueError:
+                    why = {}
+                if not isinstance(why, dict) or why.get("chosen") not in implement.SIZES:  # the router decides now
+                    _, why = implement.route(connection, settings, chosen)
+                implement.queue(connection, item_id, project, settings.implement_models[why["chosen"]], why)
                 _start(item_id, project, command="implement")
         finally:
             connection.close()
@@ -3113,7 +3126,7 @@ class _Handler(BaseHTTPRequestHandler):
                 suggestion_chat.send(connection, settings, item_id, project, (form.get("message") or [""])[0])
             else:
                 suggestion_chat.reset(connection, item_id, project)
-        except Exception as error:  # shown in the suggestion's Ask about this; the question can be asked again
+        except Exception as error:  # shown in the suggestion's Ask about this; the question can be asked again  # noqa: BLE001
             kept += [("ask", anchor), ("ask_error", f"{type(error).__name__}: {error}"[:300])]
         finally:
             connection.close()

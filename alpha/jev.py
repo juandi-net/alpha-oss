@@ -1,5 +1,5 @@
-"""Decisions Jev makes: category, duplicate detection, project relevance, skill membership, and the judge's
-fit and sauce questions.
+"""Decisions Jev makes: category, duplicate detection, project relevance, skill membership, the judge's fit and
+sauce questions, and how big a change Implement's agent is about to make (implement.route).
 
 TypeSafe System One API through the official SDK (https://docs.typesafe.ai). Each request sends
 one item as `state` and many questions, which Jev answers in parallel. Billing is per
@@ -74,6 +74,16 @@ RELEASE_SAUCE_DEFINITION = (
     "new; a test, placeholder, or internal artifact; an empty or template card; or an idea off the project's work "
     "and the user's taste. " + IDEA_RULE
 )
+# Implement's router (implement.route): how much work a suggestion's change is, as Let There's router asks it of a
+# note, for a change described in words rather than pointed at.
+CHANGE_LEVELS = [
+    ("Copy, one value, one style, or one config line: reword or remove text, change a label, a constant, a color, a "
+    "link target, an order; nothing new is built and nothing changes how the project works"),
+    ("A contained change to how one part works: a new option, field, filter, query, rule, check, or small section; "
+    "one or two files, following patterns the project already has"),
+    ("A new feature, flow, screen, integration, or pipeline step; several files or a new module; data model, auth, "
+    "payments, background jobs, or anything whose design is open"),
+]
 
 
 def sauce_definition(kind: str) -> tuple[str, str]:
@@ -100,6 +110,13 @@ class Classification:
     category_confidence: float
     duplicate_of: str | None
     duplicate_probability: float | None
+
+
+@dataclass
+class ChangeSize:
+    probabilities: list[float]       # per CHANGE_LEVELS: small, medium, large
+    logic: float                     # probability it changes how something works, not only how it reads or looks
+    design: float                    # probability it leaves real design choices open
 
 
 @dataclass
@@ -250,7 +267,7 @@ class Jev:
         return results
 
     def sauce(self, state: str, project: str, brief: str, candidates: list[tuple[str, str]],
-              kind: str = "post") -> "Sauce":
+              kind: str = "post") -> Sauce:
         """Stage 2: the probability the candidate is sauce for the project (definition by kind), and novelty against
         candidates: (id, "title: summary") of items and skills the user already has (see shortlist), 1 minus the
         closest repeat."""
@@ -279,6 +296,28 @@ class Jev:
             best = max(range(len(candidates)), key=lambda index: answers[f"repeat_{index}"].noul)
             similar, repeat = candidates[best][0], answers[f"repeat_{best}"].noul
         return Sauce(sauce=answers["sauce"].noul, novelty=1 - repeat, similar_to=similar)
+
+    def change_size(self, state: str) -> ChangeSize:
+        """Implement's router: how much work the change needs (a Score over CHANGE_LEVELS), whether it alters
+        behavior, and whether its design is left open, in one request."""
+        answers = self._ask(state, {
+            "size": Score(instructions="How much work does this change need from a coding agent working in the "
+                          "project's repository?", criteria=CHANGE_LEVELS),
+            "logic": Noul(instructions="Does the change alter how something works (behavior, data, a handler, a query, "
+                          "a rule), not only how it reads or looks?",
+                          criteria=NoulCriteria(true="Behavior or data changes",
+                                                false="Only words, values, or styling change")),
+            "design": Noul(instructions="Does the change leave real design choices open: where it goes, how it should "
+                           "work, or which of several ways to do it?",
+                           criteria=NoulCriteria(true="Open choices an engineer would have to make",
+                                                 false="It says exactly what to do")),
+        })
+        size = answers["size"]
+        levels = range(len(CHANGE_LEVELS))
+        probabilities = [float((size.probabilities or {}).get(level, 0.0)) for level in levels]
+        if not any(probabilities):
+            probabilities = [1.0 if level == round(size.score) else 0.0 for level in levels]
+        return ChangeSize(probabilities, answers["logic"].noul, answers["design"].noul)
 
 
 @dataclass

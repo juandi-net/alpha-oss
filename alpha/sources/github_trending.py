@@ -75,9 +75,9 @@ CREATE TABLE IF NOT EXISTS github_trending_cache (
 """
 
 ROW = '<article class="Box-row">'
-HEADING = re.compile(r'<h2 class="h3 lh-condensed">.*?href="/([^"/]+/[^"/]+)"', re.S)
+HEADING = re.compile(r'<h2 class="h3 lh-condensed">.*?href="/([^"/]+/[^"/]+)"', re.DOTALL)
 RECORD = re.compile(r"(?:record_id|repository_id)&quot;:(\d+)")
-DESCRIPTION = re.compile(r'<p class="col-9[^"]*">(.*?)</p>', re.S)
+DESCRIPTION = re.compile(r'<p class="col-9[^"]*">(.*?)</p>', re.DOTALL)
 LANGUAGE = re.compile(r'itemprop="programmingLanguage">([^<]+)<')
 GAINED = re.compile(r"([\d,]+) stars? (today|this week|this month)")
 
@@ -206,7 +206,7 @@ def parse(page: str) -> list[dict]:
         record = RECORD.search(block)
         description = DESCRIPTION.search(block)
         language = LANGUAGE.search(block)
-        counts = {kind: re.search(rf'href="/{re.escape(full_name)}/{kind}"[^>]*>.*?([\d,]+)\s*</a>', block, re.S)
+        counts = {kind: re.search(rf'href="/{re.escape(full_name)}/{kind}"[^>]*>.*?([\d,]+)\s*</a>', block, re.DOTALL)
                   for kind in ("stargazers", "forks")}
         gained = GAINED.search(block)
         repos.append({
